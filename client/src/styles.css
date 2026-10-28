@@ -144,6 +144,8 @@ button,
 button:hover,
 .button:hover { background: #000; color: white; }
 
+button:disabled { opacity: 0.55; cursor: wait; }
+
 .banner.ok { background: var(--green-soft); }
 .banner.warn { background: var(--warn-soft); }
 .banner.bad { background: var(--rust-soft); }

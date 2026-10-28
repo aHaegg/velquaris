@@ -11,7 +11,9 @@ cp .env.example .env
 npm run dev
 ```
 
-Open http://localhost:3000. `GET /health` checks the database.
+Open http://localhost:5173. The Vite app proxies API requests to the server on port 3000. `GET /health` checks the database.
+
+`npm run build` compiles the server and the React app. `npm start` serves both from port 3000.
 
 ## CSV files
 
