@@ -18,3 +18,16 @@ export function port(): number {
   }
   return value;
 }
+
+export function uploadSecret(): string | null {
+  const secret = process.env.UPLOAD_SECRET?.trim();
+  return secret ? secret : null;
+}
+
+export type UploadPolicy = "open" | "secret" | "disabled";
+
+export function uploadPolicy(): UploadPolicy {
+  if (uploadSecret()) return "secret";
+  if (process.env.NODE_ENV === "production") return "disabled";
+  return "open";
+}
