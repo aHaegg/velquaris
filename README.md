@@ -19,4 +19,4 @@ The repo includes `render.yaml`. In the Render dashboard, create a Blueprint fro
 
 That host is IPv4. The direct `db.<project-ref>.supabase.co` host is often IPv6-only, which Render cannot reach.
 
-Supabase path: Project Settings → Database → Connection string → Session pooler.
+Supabase path: open the project, click **Connect** at the top, choose **Session pooler**, and copy the URI. Replace `[YOUR-PASSWORD]` with the database password.
