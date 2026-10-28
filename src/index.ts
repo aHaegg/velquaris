@@ -146,12 +146,12 @@ async function receiveUpload(req: express.Request, res: express.Response): Promi
     return;
   }
 
-  const imported = parsed.prices.length + parsed.earnings.length + parsed.valuations.length;
+  const imported = parsed.prices.length + parsed.earnings.length;
   const issues = parsed.issues.map(formatIssue);
   if (imported === 0) {
     res.status(400).json({
       tone: "bad",
-      summary: issues.length > 0 ? "Nothing was saved." : "No price, EPS, or P/E values were found.",
+      summary: issues.length > 0 ? "Nothing was saved." : "No price or EPS values were found.",
       tickers: [],
       issues,
     } satisfies UploadFeedback);
@@ -169,7 +169,6 @@ async function receiveUpload(req: express.Request, res: express.Response): Promi
   const counts = [
     countPhrase(parsed.prices.length, "price"),
     countPhrase(parsed.earnings.length, "EPS value"),
-    countPhrase(parsed.valuations.length, "P/E value"),
   ].filter((part) => !part.startsWith("0 "));
   const feedback: UploadFeedback = {
     tone: issues.length > 0 ? "warn" : "ok",

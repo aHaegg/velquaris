@@ -49,7 +49,7 @@ export function UploadPage() {
     <>
       <header className="page-head">
         <h1>Upload CSV</h1>
-        <p>Add tickers and historical prices, earnings per share, and P/E ratios.</p>
+        <p>Add tickers and historical prices and quarterly earnings per share. P/E is the price divided by the sum of the last four quarters.</p>
       </header>
       {feedback ? <Feedback feedback={feedback} /> : null}
       {error ? (
@@ -106,8 +106,8 @@ export function UploadPage() {
           volume, turnover, and trades are ignored.
         </p>
         <p>
-          A table can also use these columns. A row can leave price, EPS, or P/E blank. Uploading the same ticker and date again updates
-          that point and leaves other dates in place.
+          A table can also use these columns. A row can leave price or EPS blank. Uploading the same ticker and date again updates that
+          point and leaves other dates in place.
         </p>
         <div className="table-wrap">
           <table>
@@ -117,7 +117,6 @@ export function UploadPage() {
                 <th>date</th>
                 <th className="num">price</th>
                 <th className="num">eps</th>
-                <th className="num">pe</th>
                 <th>name</th>
               </tr>
             </thead>
@@ -127,7 +126,6 @@ export function UploadPage() {
                 <td>2024-01-05</td>
                 <td className="num">181.18</td>
                 <td />
-                <td />
                 <td>Apple</td>
               </tr>
               <tr>
@@ -135,7 +133,6 @@ export function UploadPage() {
                 <td>2024-03-30</td>
                 <td />
                 <td className="num">1.53</td>
-                <td className="num">28.4</td>
                 <td />
               </tr>
             </tbody>
@@ -149,8 +146,8 @@ export function UploadPage() {
           <a href="/template.csv">Download a template</a>. Delete the DEMO row before you upload it, or that sample will be saved.
         </p>
         <p>
-          Check “Replace existing history” when the file should become the full history for those tickers. That removes prices, EPS, and
-          P/E already stored for them.
+          Check “Replace existing history” when the file should become the full history for those tickers. That removes prices and EPS
+          already stored for them.
         </p>
       </section>
     </>

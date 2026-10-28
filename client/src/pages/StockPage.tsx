@@ -4,6 +4,7 @@ import { ApiError, getStock } from "../api";
 import { Series } from "../components/Series";
 import { useTitle } from "../title";
 import type { StockHistory } from "../types";
+import { priceEarnings } from "../valuation";
 
 export function StockPage() {
   const { ticker = "" } = useParams();
@@ -78,8 +79,9 @@ export function StockPage() {
       <div className="series-list">
         <Series label="Price" points={stock.prices} color="#1e6b45" />
         <Series label="Earnings per share" points={stock.earnings} color="#8d3b2b" />
-        <Series label="P/E" points={stock.valuations} color="#1e4d78" />
+        <Series label="P/E" points={priceEarnings(stock.prices, stock.earnings)} color="#1e4d78" />
       </div>
+      <p className="note">P/E is the closing price divided by the sum of the last four quarterly EPS figures on or before that date. Dates with fewer than four quarters have no P/E.</p>
     </>
   );
 }

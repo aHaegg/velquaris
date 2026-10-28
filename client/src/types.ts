@@ -5,8 +5,7 @@ export type StockSummary = {
   priceDate: string | null;
   eps: string | null;
   epsDate: string | null;
-  pe: string | null;
-  peDate: string | null;
+  earnings: HistoryPoint[];
 };
 
 export type HistoryPoint = {
@@ -19,7 +18,6 @@ export type StockHistory = {
   name: string | null;
   prices: HistoryPoint[];
   earnings: HistoryPoint[];
-  valuations: HistoryPoint[];
 };
 
 export type UploadPolicy = "open" | "secret" | "disabled";

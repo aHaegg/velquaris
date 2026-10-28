@@ -4,6 +4,7 @@ import { getStocks } from "../api";
 import { formatNumber } from "../format";
 import { useTitle } from "../title";
 import type { StockSummary } from "../types";
+import { latestPriceEarnings } from "../valuation";
 
 export function StocksPage() {
   useTitle("Stocks");
@@ -72,24 +73,27 @@ export function StocksPage() {
                 </tr>
               </thead>
               <tbody>
-                {stocks.map((stock) => (
-                  <tr key={stock.ticker}>
-                    <td>
-                      <Link className="ticker" to={`/stocks/${encodeURIComponent(stock.ticker)}`}>
-                        {stock.ticker}
-                      </Link>
-                      {stock.name ? <span className="sub">{stock.name}</span> : null}
-                    </td>
-                    <Figure value={stock.price} date={stock.priceDate} />
-                    <Figure value={stock.eps} date={stock.epsDate} />
-                    <Figure value={stock.pe} date={stock.peDate} />
-                  </tr>
-                ))}
+                {stocks.map((stock) => {
+                  const pe = latestPriceEarnings(stock.price, stock.priceDate, stock.earnings);
+                  return (
+                    <tr key={stock.ticker}>
+                      <td>
+                        <Link className="ticker" to={`/stocks/${encodeURIComponent(stock.ticker)}`}>
+                          {stock.ticker}
+                        </Link>
+                        {stock.name ? <span className="sub">{stock.name}</span> : null}
+                      </td>
+                      <Figure value={stock.price} date={stock.priceDate} />
+                      <Figure value={stock.eps} date={stock.epsDate} />
+                      <Figure value={pe.value} date={pe.date} />
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
           <p className="note">
-            Each figure is the latest uploaded value, with its date underneath. P/E is stored as uploaded, not calculated from price and EPS.
+            Price and EPS are the latest uploaded values. P/E is that price divided by the sum of the last four quarterly EPS figures on or before the price date. It is blank until four quarters are available.
           </p>
         </>
       )}

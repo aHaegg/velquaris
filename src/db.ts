@@ -42,12 +42,7 @@ create table if not exists velquaris.earnings (
   primary key (ticker, as_of)
 );
 
-create table if not exists velquaris.valuations (
-  ticker text not null references velquaris.stocks (ticker) on delete cascade,
-  as_of date not null,
-  pe numeric not null,
-  primary key (ticker, as_of)
-);
+drop table if exists velquaris.valuations;
 
 revoke all on schema velquaris from public;
 `;
@@ -64,8 +59,7 @@ export type StockSummary = {
   priceDate: string | null;
   eps: string | null;
   epsDate: string | null;
-  pe: string | null;
-  peDate: string | null;
+  earnings: HistoryPoint[];
 };
 
 export type HistoryPoint = {
@@ -78,7 +72,6 @@ export type StockHistory = {
   name: string | null;
   prices: HistoryPoint[];
   earnings: HistoryPoint[];
-  valuations: HistoryPoint[];
 };
 
 type StockRow = {
@@ -88,8 +81,6 @@ type StockRow = {
   price_date: string | null;
   eps: string | null;
   eps_date: string | null;
-  pe: string | null;
-  pe_date: string | null;
 };
 
 export async function migrate(): Promise<void> {
@@ -113,9 +104,7 @@ export async function listStocks(): Promise<StockSummary[]> {
       p.price::text as price,
       p.as_of::text as price_date,
       e.eps::text as eps,
-      e.as_of::text as eps_date,
-      v.pe::text as pe,
-      v.as_of::text as pe_date
+      e.as_of::text as eps_date
     from velquaris.stocks s
     left join lateral (
       select price, as_of from velquaris.prices
@@ -129,14 +118,19 @@ export async function listStocks(): Promise<StockSummary[]> {
       order by as_of desc
       limit 1
     ) e on true
-    left join lateral (
-      select pe, as_of from velquaris.valuations
-      where ticker = s.ticker
-      order by as_of desc
-      limit 1
-    ) v on true
     order by s.ticker
   `);
+  const earnings = await pool.query<{ ticker: string; as_of: string; value: string }>(`
+    select ticker, as_of::text as as_of, eps::text as value
+    from velquaris.earnings
+    order by ticker, as_of
+  `);
+  const earningsByTicker = new Map<string, HistoryPoint[]>();
+  for (const row of earnings.rows) {
+    const points = earningsByTicker.get(row.ticker) ?? [];
+    points.push({ asOf: row.as_of, value: row.value });
+    earningsByTicker.set(row.ticker, points);
+  }
   return result.rows.map((row) => ({
     ticker: row.ticker,
     name: row.name,
@@ -144,8 +138,7 @@ export async function listStocks(): Promise<StockSummary[]> {
     priceDate: row.price_date,
     eps: row.eps,
     epsDate: row.eps_date,
-    pe: row.pe,
-    peDate: row.pe_date,
+    earnings: earningsByTicker.get(row.ticker) ?? [],
   }));
 }
 
@@ -156,12 +149,11 @@ export async function getStock(ticker: string): Promise<StockHistory | null> {
   );
   const row = stock.rows[0];
   if (!row) return null;
-  const [prices, earnings, valuations] = await Promise.all([
+  const [prices, earnings] = await Promise.all([
     history("prices", "price", ticker),
     history("earnings", "eps", ticker),
-    history("valuations", "pe", ticker),
   ]);
-  return { ticker: row.ticker, name: row.name, prices, earnings, valuations };
+  return { ticker: row.ticker, name: row.name, prices, earnings };
 }
 
 export async function importHistory(parsed: ParsedHistory, replace: boolean): Promise<void> {
@@ -181,11 +173,9 @@ export async function importHistory(parsed: ParsedHistory, replace: boolean): Pr
     if (replace) {
       await client.query("delete from velquaris.prices where ticker = any($1::text[])", [tickers]);
       await client.query("delete from velquaris.earnings where ticker = any($1::text[])", [tickers]);
-      await client.query("delete from velquaris.valuations where ticker = any($1::text[])", [tickers]);
     }
     await insertSeries(client, "prices", "price", parsed.prices);
     await insertSeries(client, "earnings", "eps", parsed.earnings);
-    await insertSeries(client, "valuations", "pe", parsed.valuations);
     await client.query("commit");
   } catch (error) {
     await client.query("rollback");
@@ -196,8 +186,8 @@ export async function importHistory(parsed: ParsedHistory, replace: boolean): Pr
 }
 
 async function history(
-  table: "prices" | "earnings" | "valuations",
-  column: "price" | "eps" | "pe",
+  table: "prices" | "earnings",
+  column: "price" | "eps",
   ticker: string,
 ): Promise<HistoryPoint[]> {
   const result = await pool.query<{ as_of: string; value: string }>(
@@ -212,8 +202,8 @@ async function history(
 
 async function insertSeries(
   client: pg.PoolClient,
-  table: "prices" | "earnings" | "valuations",
-  column: "price" | "eps" | "pe",
+  table: "prices" | "earnings",
+  column: "price" | "eps",
   points: SeriesPoint[],
 ): Promise<void> {
   if (points.length === 0) return;

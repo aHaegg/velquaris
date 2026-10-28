@@ -30,12 +30,6 @@ const HEADER_FIELDS = {
   "earnings per share": "eps",
   vpa: "eps",
   "vinst per aktie": "eps",
-  pe: "pe",
-  "p e": "pe",
-  "p e ratio": "pe",
-  "pe ratio": "pe",
-  "pe tal": "pe",
-  "p e tal": "pe",
 } as const;
 
 type Field = (typeof HEADER_FIELDS)[keyof typeof HEADER_FIELDS];
@@ -56,7 +50,6 @@ export type ParsedHistory = {
   tickers: { ticker: string; name: string | null }[];
   prices: SeriesPoint[];
   earnings: SeriesPoint[];
-  valuations: SeriesPoint[];
   issues: ParseIssue[];
 };
 
@@ -89,7 +82,7 @@ export function parseCsv(buffer: Buffer, options: CsvParseOptions = {}): ParsedH
   if (!header) {
     return empty(
       source,
-      "The file needs a date column and at least one of price, closing price, eps, or pe.",
+      "The file needs a date column and at least one of price, closing price, or eps.",
     );
   }
 
@@ -106,7 +99,6 @@ export function parseCsv(buffer: Buffer, options: CsvParseOptions = {}): ParsedH
 
   const prices = new Map<string, SeriesPoint>();
   const earnings = new Map<string, SeriesPoint>();
-  const valuations = new Map<string, SeriesPoint>();
   const names = new Map<string, string | null>();
   const issues: ParseIssue[] = [];
 
@@ -120,7 +112,6 @@ export function parseCsv(buffer: Buffer, options: CsvParseOptions = {}): ParsedH
       columns,
       prices,
       earnings,
-      valuations,
       names,
       issues,
     );
@@ -132,17 +123,16 @@ export function parseCsv(buffer: Buffer, options: CsvParseOptions = {}): ParsedH
       .sort((a, b) => a.ticker.localeCompare(b.ticker)),
     prices: [...prices.values()],
     earnings: [...earnings.values()],
-    valuations: [...valuations.values()],
     issues,
   };
 }
 
 export function buildTemplate(): string {
-  return "ticker,date,price,eps,pe,name\nDEMO,2024-01-31,100,2.5,40,Sample company\n";
+  return "ticker,date,price,eps,name\nDEMO,2024-01-31,100,2.5,Sample company\n";
 }
 
 function empty(source: string, message: string): ParsedHistory {
-  return { tickers: [], prices: [], earnings: [], valuations: [], issues: [{ source, row: null, message }] };
+  return { tickers: [], prices: [], earnings: [], issues: [{ source, row: null, message }] };
 }
 
 function fallbackTicker(
@@ -265,7 +255,7 @@ function findHeader(records: string[][]): { index: number; columns: Map<number, 
   for (let index = 0; index < limit; index += 1) {
     const columns = columnsForHeader(records[index] ?? []);
     const fields = new Set(columns.values());
-    const useful = fields.has("date") && (fields.has("price") || fields.has("eps") || fields.has("pe"));
+    const useful = fields.has("date") && (fields.has("price") || fields.has("eps"));
     if (useful && fields.size > bestScore) {
       bestScore = fields.size;
       header = { index, columns };
@@ -306,7 +296,6 @@ function readDataRow(
   columns: Map<number, Field>,
   prices: Map<string, SeriesPoint>,
   earnings: Map<string, SeriesPoint>,
-  valuations: Map<string, SeriesPoint>,
   names: Map<string, string | null>,
   issues: ParseIssue[],
 ): void {
@@ -317,10 +306,9 @@ function readDataRow(
   const dateResult = parseDateText(picked.get("date") ?? "");
   const price = parseMetric(picked.get("price") ?? "");
   const eps = parseMetric(picked.get("eps") ?? "");
-  const pe = parseMetric(picked.get("pe") ?? "");
   const name = parseName(picked.get("name") ?? "");
-  const hasMetric = typeof price === "number" || typeof eps === "number" || typeof pe === "number";
-  const invalidMetric = price === "invalid" || eps === "invalid" || pe === "invalid";
+  const hasMetric = typeof price === "number" || typeof eps === "number";
+  const invalidMetric = price === "invalid" || eps === "invalid";
 
   if (!tickerText && !dateResult.value && !hasMetric && !invalidMetric && !name) return;
   if (!hasMetric && !invalidMetric) return;
@@ -351,17 +339,12 @@ function readDataRow(
   let stored = false;
   if (price === "invalid") addIssue(issues, { source, row: line, message: "Price is not a number." });
   if (eps === "invalid") addIssue(issues, { source, row: line, message: "EPS is not a number." });
-  if (pe === "invalid") addIssue(issues, { source, row: line, message: "P/E is not a number." });
   if (typeof price === "number") {
     prices.set(pointKey(ticker, dateResult.value), { ticker, asOf: dateResult.value, value: price });
     stored = true;
   }
   if (typeof eps === "number") {
     earnings.set(pointKey(ticker, dateResult.value), { ticker, asOf: dateResult.value, value: eps });
-    stored = true;
-  }
-  if (typeof pe === "number") {
-    valuations.set(pointKey(ticker, dateResult.value), { ticker, asOf: dateResult.value, value: pe });
     stored = true;
   }
   if (stored) {
