@@ -173,23 +173,58 @@ export async function getStock(ticker: string): Promise<StockHistory | null> {
   return { ticker: row.ticker, name: row.name, prices, earnings };
 }
 
+export type SavedEarning =
+  | { ok: true; asOf: string; eps: string }
+  | { ok: false; reason: "missing" | "conflict" };
+
 export async function saveEarning(
   ticker: string,
   asOf: string,
   eps: number,
-): Promise<{ asOf: string; eps: string } | null> {
-  const saved = await pool.query<{ as_of: string; eps: string }>(
-    `insert into velquaris.earnings (ticker, as_of, eps)
-     select $1, $2::date, $3
-     where exists (select 1 from velquaris.stocks where ticker = $1)
-     on conflict (ticker, as_of) do update set eps = excluded.eps
-     returning as_of::text as as_of, eps::text as eps`,
-    [ticker, asOf, eps],
-  );
-  const row = saved.rows[0];
-  if (!row) return null;
-  await pool.query("update velquaris.stocks set updated_at = now() where ticker = $1", [ticker]);
-  return { asOf: row.as_of, eps: row.eps };
+  previousAsOf: string | null,
+): Promise<SavedEarning> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const stock = await client.query("select 1 from velquaris.stocks where ticker = $1", [ticker]);
+    if ((stock.rowCount ?? 0) === 0) {
+      await client.query("rollback");
+      return { ok: false, reason: "missing" };
+    }
+
+    const saved = previousAsOf
+      ? await client.query<{ as_of: string; eps: string }>(
+          `update velquaris.earnings
+           set as_of = $3::date, eps = $4
+           where ticker = $1 and as_of = $2::date
+           returning as_of::text as as_of, eps::text as eps`,
+          [ticker, previousAsOf, asOf, eps],
+        )
+      : await client.query<{ as_of: string; eps: string }>(
+          `insert into velquaris.earnings (ticker, as_of, eps)
+           values ($1, $2::date, $3)
+           returning as_of::text as as_of, eps::text as eps`,
+          [ticker, asOf, eps],
+        );
+    const row = saved.rows[0];
+    if (!row) {
+      await client.query("rollback");
+      return { ok: false, reason: "missing" };
+    }
+    await client.query("update velquaris.stocks set updated_at = now() where ticker = $1", [ticker]);
+    await client.query("commit");
+    return { ok: true, asOf: row.as_of, eps: row.eps };
+  } catch (error) {
+    await client.query("rollback");
+    if (isUniqueViolation(error)) return { ok: false, reason: "conflict" };
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "23505";
 }
 
 export async function importHistory(parsed: ParsedHistory, replace: boolean): Promise<void> {

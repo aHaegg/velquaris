@@ -17,8 +17,17 @@ export function getStock(ticker: string): Promise<StockHistory> {
   return getJson<StockHistory>(`/api/stocks/${encodeURIComponent(ticker)}`);
 }
 
-export function saveEarning(ticker: string, asOf: string, eps: string): Promise<{ asOf: string; eps: string }> {
-  return postJson(`/api/stocks/${encodeURIComponent(ticker)}/earnings`, { asOf, eps });
+export function saveEarning(
+  ticker: string,
+  asOf: string,
+  eps: string,
+  previousAsOf?: string,
+): Promise<{ asOf: string; eps: string }> {
+  return postJson(`/api/stocks/${encodeURIComponent(ticker)}/earnings`, {
+    asOf,
+    eps,
+    previousAsOf,
+  });
 }
 
 export async function currentUser(): Promise<SessionUser | null> {

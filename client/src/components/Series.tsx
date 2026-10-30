@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { formatNumber } from "../format";
 import type { HistoryPoint } from "../types";
 
@@ -5,10 +6,12 @@ export function Series({
   label,
   points,
   color,
+  details,
 }: {
   label: string;
   points: HistoryPoint[];
   color: string;
+  details?: ReactNode;
 }) {
   const caption =
     points.length === 0
@@ -23,7 +26,8 @@ export function Series({
         <p>{caption}</p>
       </header>
       <LineChart points={points} color={color} label={label} />
-      {points.length === 0 ? null : (
+      {details}
+      {details || points.length === 0 ? null : (
         <div className="table-wrap scroll">
           <table>
             <thead>

@@ -164,18 +164,26 @@ app.get("/api/stocks/:ticker", requireAuth, async (req, res) => {
 app.post("/api/stocks/:ticker/earnings", requireAuth, async (req, res) => {
   const ticker = canonicalTicker(routeParam(req.params.ticker));
   const asOf = isoDate(textField(req.body?.asOf));
+  const previousText = textField(req.body?.previousAsOf);
+  const previousAsOf = previousText ? isoDate(previousText) : null;
   const eps = parseAmount(textField(req.body?.eps));
-  if (!ticker || !asOf || eps === null) {
-    res.status(400).json({ message: "Choose a quarter and enter an EPS value." });
+  if (!ticker || !asOf || eps === null || (previousText !== "" && !previousAsOf)) {
+    res.status(400).json({ message: "Enter a date and an EPS value." });
     return;
   }
   try {
-    const saved = await saveEarning(ticker, asOf, eps);
-    if (!saved) {
-      res.status(404).json({ message: "That stock is not in Velquaris." });
+    const saved = await saveEarning(ticker, asOf, eps, previousAsOf);
+    if (!saved.ok && saved.reason === "conflict") {
+      res.status(409).json({ message: "That date already has an EPS value." });
       return;
     }
-    res.json(saved);
+    if (!saved.ok) {
+      res.status(404).json({
+        message: previousAsOf ? "That EPS value is no longer there." : "That stock is not in Velquaris.",
+      });
+      return;
+    }
+    res.json({ asOf: saved.asOf, eps: saved.eps });
   } catch (error) {
     console.error(errorMessage(error));
     res.status(500).json({ message: "The EPS value could not be saved." });

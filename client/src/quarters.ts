@@ -34,13 +34,6 @@ export function listQuarters(
   });
 }
 
-export function followsReportedMonths(earnings: HistoryPoint[]): boolean {
-  return earnings.some((point) => {
-    const month = Number(point.asOf.slice(5, 7));
-    return month >= 1 && month <= 12;
-  });
-}
-
 function quarterEndMonths(earnings: HistoryPoint[]): number[] {
   const counts = new Map<number, number>();
   for (const point of earnings) {
