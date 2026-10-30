@@ -19,15 +19,16 @@ export function getStock(ticker: string): Promise<StockHistory> {
 
 export function saveEarning(
   ticker: string,
-  asOf: string,
-  eps: string,
-  previousAsOf?: string,
-): Promise<{ asOf: string; eps: string }> {
-  return postJson(`/api/stocks/${encodeURIComponent(ticker)}/earnings`, {
-    asOf,
-    eps,
-    previousAsOf,
-  });
+  earning: {
+    year: number;
+    quarter: number;
+    reportDate: string;
+    eps: string;
+    previousYear?: number;
+    previousQuarter?: number;
+  },
+): Promise<{ year: number; quarter: number; reportDate: string; eps: string }> {
+  return postJson(`/api/stocks/${encodeURIComponent(ticker)}/earnings`, earning);
 }
 
 export async function currentUser(): Promise<SessionUser | null> {

@@ -4,8 +4,9 @@ export type StockSummary = {
   price: string | null;
   priceDate: string | null;
   eps: string | null;
-  epsDate: string | null;
-  earnings: HistoryPoint[];
+  epsYear: number | null;
+  epsQuarter: number | null;
+  earnings: Earning[];
 };
 
 export type HistoryPoint = {
@@ -13,11 +14,18 @@ export type HistoryPoint = {
   value: string;
 };
 
+export type Earning = {
+  year: number;
+  quarter: number;
+  reportDate: string;
+  value: string;
+};
+
 export type StockHistory = {
   ticker: string;
   name: string | null;
   prices: HistoryPoint[];
-  earnings: HistoryPoint[];
+  earnings: Earning[];
 };
 
 export type SessionUser = {

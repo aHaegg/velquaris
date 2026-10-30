@@ -163,27 +163,33 @@ app.get("/api/stocks/:ticker", requireAuth, async (req, res) => {
 
 app.post("/api/stocks/:ticker/earnings", requireAuth, async (req, res) => {
   const ticker = canonicalTicker(routeParam(req.params.ticker));
-  const asOf = isoDate(textField(req.body?.asOf));
-  const previousText = textField(req.body?.previousAsOf);
-  const previousAsOf = previousText ? isoDate(previousText) : null;
+  const year = yearField(textField(req.body?.year));
+  const quarter = quarterField(textField(req.body?.quarter));
+  const reportDate = isoDate(textField(req.body?.reportDate));
+  const previousYearText = textField(req.body?.previousYear);
+  const previousQuarterText = textField(req.body?.previousQuarter);
+  const previousYear = previousYearText ? yearField(previousYearText) : null;
+  const previousQuarter = previousQuarterText ? quarterField(previousQuarterText) : null;
   const eps = parseAmount(textField(req.body?.eps));
-  if (!ticker || !asOf || eps === null || (previousText !== "" && !previousAsOf)) {
-    res.status(400).json({ message: "Enter a date and an EPS value." });
+  const previousPair = previousYearText !== "" || previousQuarterText !== "";
+  if (!ticker || !year || !quarter || !reportDate || eps === null || (previousPair && (!previousYear || !previousQuarter))) {
+    res.status(400).json({ message: "Enter a year, a quarter, a report date, and an EPS value." });
     return;
   }
   try {
-    const saved = await saveEarning(ticker, asOf, eps, previousAsOf);
+    const previous = previousYear && previousQuarter ? { year: previousYear, quarter: previousQuarter } : null;
+    const saved = await saveEarning(ticker, { year, quarter, reportDate, eps }, previous);
     if (!saved.ok && saved.reason === "conflict") {
-      res.status(409).json({ message: "That date already has an EPS value." });
+      res.status(409).json({ message: "That year and quarter already have an EPS value." });
       return;
     }
     if (!saved.ok) {
       res.status(404).json({
-        message: previousAsOf ? "That EPS value is no longer there." : "That stock is not in Velquaris.",
+        message: previous ? "That EPS value is no longer there." : "That stock is not in Velquaris.",
       });
       return;
     }
-    res.json({ asOf: saved.asOf, eps: saved.eps });
+    res.json({ year: saved.year, quarter: saved.quarter, reportDate: saved.reportDate, eps: saved.eps });
   } catch (error) {
     console.error(errorMessage(error));
     res.status(500).json({ message: "The EPS value could not be saved." });
@@ -348,6 +354,17 @@ function publicUser(user: SessionUser): SessionUser {
   return { username: user.username, role: user.role };
 }
 
+function yearField(value: string): number | null {
+  if (!/^\d{4}$/.test(value.trim())) return null;
+  const year = Number(value);
+  return year >= 1900 && year <= 2200 ? year : null;
+}
+
+function quarterField(value: string): number | null {
+  const quarter = Number(value.trim());
+  return quarter === 1 || quarter === 2 || quarter === 3 || quarter === 4 ? quarter : null;
+}
+
 function isoDate(value: string): string | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
   if (!match) return null;
@@ -363,6 +380,7 @@ function isoDate(value: string): string | null {
 }
 
 function textField(value: unknown): string {
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
   if (typeof value === "string") return value;
   if (Array.isArray(value) && typeof value[0] === "string") return value[0];
   return "";

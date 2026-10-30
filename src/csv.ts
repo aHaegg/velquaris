@@ -13,6 +13,12 @@ const HEADER_FIELDS = {
   date: "date",
   datum: "date",
   "as of": "date",
+  year: "year",
+  "fiscal year": "year",
+  quarter: "quarter",
+  kvartal: "quarter",
+  "report date": "reportDate",
+  "release date": "reportDate",
   price: "price",
   close: "price",
   "close price": "price",
@@ -40,6 +46,14 @@ export type SeriesPoint = {
   value: number;
 };
 
+export type EarningPoint = {
+  ticker: string;
+  year: number;
+  quarter: number;
+  reportDate: string;
+  value: number;
+};
+
 export type ParseIssue = {
   source: string;
   row: number | null;
@@ -49,7 +63,7 @@ export type ParseIssue = {
 export type ParsedHistory = {
   tickers: { ticker: string; name: string | null }[];
   prices: SeriesPoint[];
-  earnings: SeriesPoint[];
+  earnings: EarningPoint[];
   issues: ParseIssue[];
 };
 
@@ -82,7 +96,7 @@ export function parseCsv(buffer: Buffer, options: CsvParseOptions = {}): ParsedH
   if (!header) {
     return empty(
       source,
-      "The file needs a date column and at least one of price, closing price, or eps.",
+      "The file needs a date or report date, and at least one of price, closing price, or eps.",
     );
   }
 
@@ -98,7 +112,7 @@ export function parseCsv(buffer: Buffer, options: CsvParseOptions = {}): ParsedH
   }
 
   const prices = new Map<string, SeriesPoint>();
-  const earnings = new Map<string, SeriesPoint>();
+  const earnings = new Map<string, EarningPoint>();
   const names = new Map<string, string | null>();
   const issues: ParseIssue[] = [];
 
@@ -128,7 +142,7 @@ export function parseCsv(buffer: Buffer, options: CsvParseOptions = {}): ParsedH
 }
 
 export function buildTemplate(): string {
-  return "ticker,date,price,eps,name\nDEMO,2024-01-31,100,2.5,Sample company\n";
+  return "ticker,date,price,year,quarter,report_date,eps,name\nDEMO,2024-01-31,100,,,,,Sample company\nDEMO,,,,2024,1,2024-04-26,2.5,Sample company\n";
 }
 
 function empty(source: string, message: string): ParsedHistory {
@@ -255,7 +269,8 @@ function findHeader(records: string[][]): { index: number; columns: Map<number, 
   for (let index = 0; index < limit; index += 1) {
     const columns = columnsForHeader(records[index] ?? []);
     const fields = new Set(columns.values());
-    const useful = fields.has("date") && (fields.has("price") || fields.has("eps"));
+    const hasWhen = fields.has("date") || fields.has("reportDate") || (fields.has("year") && fields.has("quarter"));
+    const useful = hasWhen && (fields.has("price") || fields.has("eps"));
     if (useful && fields.size > bestScore) {
       bestScore = fields.size;
       header = { index, columns };
@@ -295,7 +310,7 @@ function readDataRow(
   cells: string[],
   columns: Map<number, Field>,
   prices: Map<string, SeriesPoint>,
-  earnings: Map<string, SeriesPoint>,
+  earnings: Map<string, EarningPoint>,
   names: Map<string, string | null>,
   issues: ParseIssue[],
 ): void {
@@ -304,13 +319,18 @@ function readDataRow(
 
   const tickerText = (picked.get("ticker") ?? "").trim();
   const dateResult = parseDateText(picked.get("date") ?? "");
+  const reportResult = parseDateText(picked.get("reportDate") ?? "");
+  const year = parseYear(picked.get("year") ?? "");
+  const quarter = parseQuarter(picked.get("quarter") ?? "");
   const price = parseMetric(picked.get("price") ?? "");
   const eps = parseMetric(picked.get("eps") ?? "");
   const name = parseName(picked.get("name") ?? "");
   const hasMetric = typeof price === "number" || typeof eps === "number";
   const invalidMetric = price === "invalid" || eps === "invalid";
 
-  if (!tickerText && !dateResult.value && !hasMetric && !invalidMetric && !name) return;
+  if (!tickerText && !dateResult.value && !reportResult.value && year === null && quarter === null && !hasMetric && !invalidMetric && !name) {
+    return;
+  }
   if (!hasMetric && !invalidMetric) return;
 
   const ticker = tickerText ? canonicalTicker(tickerText) : fallbackTicker;
@@ -325,32 +345,100 @@ function readDataRow(
     return;
   }
 
-  if (!dateResult.value) {
-    addIssue(issues, {
-      source,
-      row: line,
-      message: dateResult.invalid
-        ? `Invalid date “${dateResult.invalid}”. Use YYYY-MM-DD or DD.MM.YYYY.`
-        : "Missing date.",
-    });
-    return;
-  }
-
   let stored = false;
   if (price === "invalid") addIssue(issues, { source, row: line, message: "Price is not a number." });
   if (eps === "invalid") addIssue(issues, { source, row: line, message: "EPS is not a number." });
   if (typeof price === "number") {
-    prices.set(pointKey(ticker, dateResult.value), { ticker, asOf: dateResult.value, value: price });
-    stored = true;
+    if (!dateResult.value) {
+      addIssue(issues, {
+        source,
+        row: line,
+        message: dateResult.invalid
+          ? `Invalid date “${dateResult.invalid}”. Use YYYY-MM-DD or DD.MM.YYYY.`
+          : "Missing date.",
+      });
+    } else {
+      prices.set(pointKey(ticker, dateResult.value), { ticker, asOf: dateResult.value, value: price });
+      stored = true;
+    }
   }
   if (typeof eps === "number") {
-    earnings.set(pointKey(ticker, dateResult.value), { ticker, asOf: dateResult.value, value: eps });
-    stored = true;
+    const reported = storeEarning(ticker, dateResult, reportResult, year, quarter, eps, earnings, issues, source, line);
+    stored = stored || reported;
   }
   if (stored) {
     const existing = names.get(ticker) ?? null;
     names.set(ticker, name ?? existing);
   }
+}
+
+function storeEarning(
+  ticker: string,
+  dateResult: { value: string | null; invalid: string | null },
+  reportResult: { value: string | null; invalid: string | null },
+  year: number | null | "invalid",
+  quarter: number | null | "invalid",
+  eps: number,
+  earnings: Map<string, EarningPoint>,
+  issues: ParseIssue[],
+  source: string,
+  line: number,
+): boolean {
+  if (year === "invalid") {
+    addIssue(issues, { source, row: line, message: "Year must be a four-digit year." });
+    return false;
+  }
+  if (quarter === "invalid") {
+    addIssue(issues, { source, row: line, message: "Quarter must be 1, 2, 3, or 4." });
+    return false;
+  }
+  if ((year === null) !== (quarter === null)) {
+    addIssue(issues, { source, row: line, message: "Enter both a year and a quarter." });
+    return false;
+  }
+  const reportDate = reportResult.value ?? dateResult.value;
+  if (!reportDate) {
+    const invalid = reportResult.invalid ?? dateResult.invalid;
+    addIssue(issues, {
+      source,
+      row: line,
+      message: invalid
+        ? `Invalid report date “${invalid}”. Use YYYY-MM-DD or DD.MM.YYYY.`
+        : "Missing report date.",
+    });
+    return false;
+  }
+  const period = year !== null && quarter !== null ? { year, quarter } : periodFromReportDate(reportDate);
+  earnings.set(`${ticker}|${period.year}|${period.quarter}`, {
+    ticker,
+    year: period.year,
+    quarter: period.quarter,
+    reportDate,
+    value: eps,
+  });
+  return true;
+}
+
+function parseYear(value: string): number | null | "invalid" {
+  const text = value.trim();
+  if (!text || EMPTY_TOKENS.has(text.toLowerCase())) return null;
+  if (!/^\d{4}$/.test(text)) return "invalid";
+  const year = Number(text);
+  return year >= 1900 && year <= 2200 ? year : "invalid";
+}
+
+function parseQuarter(value: string): number | null | "invalid" {
+  const text = value.trim().toLowerCase();
+  if (!text || EMPTY_TOKENS.has(text.toLowerCase())) return null;
+  const match = /^q?([1-4])$/.exec(text);
+  return match ? Number(match[1]) : "invalid";
+}
+
+export function periodFromReportDate(reportDate: string): { year: number; quarter: number } {
+  const [yearText, monthText, dayText] = reportDate.split("-");
+  const date = new Date(Date.UTC(Number(yearText), Number(monthText) - 1, Number(dayText)));
+  date.setUTCDate(date.getUTCDate() - 60);
+  return { year: date.getUTCFullYear(), quarter: Math.ceil((date.getUTCMonth() + 1) / 3) };
 }
 
 function parseName(value: string): string | null {

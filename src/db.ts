@@ -1,6 +1,6 @@
 import pg from "pg";
 import { databaseUrl } from "./config.js";
-import type { ParsedHistory, SeriesPoint } from "./csv.js";
+import type { EarningPoint, ParsedHistory, SeriesPoint } from "./csv.js";
 
 const { Pool } = pg;
 
@@ -37,9 +37,12 @@ create table if not exists velquaris.prices (
 
 create table if not exists velquaris.earnings (
   ticker text not null references velquaris.stocks (ticker) on delete cascade,
-  as_of date not null,
+  year integer not null,
+  quarter integer not null,
+  report_date date not null,
   eps numeric not null,
-  primary key (ticker, as_of)
+  primary key (ticker, year, quarter),
+  check (quarter between 1 and 4)
 );
 
 drop table if exists velquaris.valuations;
@@ -75,8 +78,9 @@ export type StockSummary = {
   price: string | null;
   priceDate: string | null;
   eps: string | null;
-  epsDate: string | null;
-  earnings: HistoryPoint[];
+  epsYear: number | null;
+  epsQuarter: number | null;
+  earnings: Earning[];
 };
 
 export type HistoryPoint = {
@@ -84,11 +88,18 @@ export type HistoryPoint = {
   value: string;
 };
 
+export type Earning = {
+  year: number;
+  quarter: number;
+  reportDate: string;
+  value: string;
+};
+
 export type StockHistory = {
   ticker: string;
   name: string | null;
   prices: HistoryPoint[];
-  earnings: HistoryPoint[];
+  earnings: Earning[];
 };
 
 type StockRow = {
@@ -97,11 +108,58 @@ type StockRow = {
   price: string | null;
   price_date: string | null;
   eps: string | null;
-  eps_date: string | null;
+  eps_year: number | null;
+  eps_quarter: number | null;
 };
+
+const EARNINGS_UPGRADE = `
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'velquaris' and table_name = 'earnings' and column_name = 'as_of'
+  ) then
+    alter table velquaris.earnings rename column as_of to report_date;
+  end if;
+end $$;
+
+alter table velquaris.earnings add column if not exists year integer;
+alter table velquaris.earnings add column if not exists quarter integer;
+
+update velquaris.earnings
+set year = extract(year from (report_date - 60))::integer,
+    quarter = ceil(extract(month from (report_date - 60)) / 3.0)::integer
+where year is null or quarter is null;
+
+alter table velquaris.earnings alter column year set not null;
+alter table velquaris.earnings alter column quarter set not null;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'velquaris.earnings'::regclass
+      and contype = 'p'
+      and pg_get_constraintdef(oid) like '%year%'
+  ) then
+    alter table velquaris.earnings drop constraint if exists earnings_pkey;
+    alter table velquaris.earnings add primary key (ticker, year, quarter);
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'velquaris.earnings'::regclass
+      and contype = 'c'
+      and pg_get_constraintdef(oid) like '%quarter%'
+  ) then
+    alter table velquaris.earnings add constraint earnings_quarter check (quarter between 1 and 4);
+  end if;
+end $$;
+`;
 
 export async function migrate(): Promise<void> {
   await pool.query(SCHEMA);
+  await pool.query(EARNINGS_UPGRADE);
 }
 
 export async function pingDatabase(): Promise<DatabaseStatus> {
@@ -121,7 +179,8 @@ export async function listStocks(): Promise<StockSummary[]> {
       p.price::text as price,
       p.as_of::text as price_date,
       e.eps::text as eps,
-      e.as_of::text as eps_date
+      e.year as eps_year,
+      e.quarter as eps_quarter
     from velquaris.stocks s
     left join lateral (
       select price, as_of from velquaris.prices
@@ -130,22 +189,33 @@ export async function listStocks(): Promise<StockSummary[]> {
       limit 1
     ) p on true
     left join lateral (
-      select eps, as_of from velquaris.earnings
+      select eps, year, quarter from velquaris.earnings
       where ticker = s.ticker
-      order by as_of desc
+      order by year desc, quarter desc
       limit 1
     ) e on true
     order by s.ticker
   `);
-  const earnings = await pool.query<{ ticker: string; as_of: string; value: string }>(`
-    select ticker, as_of::text as as_of, eps::text as value
+  const earnings = await pool.query<{
+    ticker: string;
+    year: number;
+    quarter: number;
+    report_date: string;
+    value: string;
+  }>(`
+    select ticker, year, quarter, report_date::text as report_date, eps::text as value
     from velquaris.earnings
-    order by ticker, as_of
+    order by ticker, year, quarter
   `);
-  const earningsByTicker = new Map<string, HistoryPoint[]>();
+  const earningsByTicker = new Map<string, Earning[]>();
   for (const row of earnings.rows) {
     const points = earningsByTicker.get(row.ticker) ?? [];
-    points.push({ asOf: row.as_of, value: row.value });
+    points.push({
+      year: row.year,
+      quarter: row.quarter,
+      reportDate: row.report_date,
+      value: row.value,
+    });
     earningsByTicker.set(row.ticker, points);
   }
   return result.rows.map((row) => ({
@@ -154,7 +224,8 @@ export async function listStocks(): Promise<StockSummary[]> {
     price: row.price,
     priceDate: row.price_date,
     eps: row.eps,
-    epsDate: row.eps_date,
+    epsYear: row.eps_year,
+    epsQuarter: row.eps_quarter,
     earnings: earningsByTicker.get(row.ticker) ?? [],
   }));
 }
@@ -166,22 +237,25 @@ export async function getStock(ticker: string): Promise<StockHistory | null> {
   );
   const row = stock.rows[0];
   if (!row) return null;
-  const [prices, earnings] = await Promise.all([
-    history("prices", "price", ticker),
-    history("earnings", "eps", ticker),
-  ]);
+  const [prices, earnings] = await Promise.all([history(ticker), earningsFor(ticker)]);
   return { ticker: row.ticker, name: row.name, prices, earnings };
 }
 
+export type EarningInput = {
+  year: number;
+  quarter: number;
+  reportDate: string;
+  eps: number;
+};
+
 export type SavedEarning =
-  | { ok: true; asOf: string; eps: string }
+  | { ok: true; year: number; quarter: number; reportDate: string; eps: string }
   | { ok: false; reason: "missing" | "conflict" };
 
 export async function saveEarning(
   ticker: string,
-  asOf: string,
-  eps: number,
-  previousAsOf: string | null,
+  earning: EarningInput,
+  previous: { year: number; quarter: number } | null,
 ): Promise<SavedEarning> {
   const client = await pool.connect();
   try {
@@ -192,19 +266,19 @@ export async function saveEarning(
       return { ok: false, reason: "missing" };
     }
 
-    const saved = previousAsOf
-      ? await client.query<{ as_of: string; eps: string }>(
+    const saved = previous
+      ? await client.query<{ year: number; quarter: number; report_date: string; eps: string }>(
           `update velquaris.earnings
-           set as_of = $3::date, eps = $4
-           where ticker = $1 and as_of = $2::date
-           returning as_of::text as as_of, eps::text as eps`,
-          [ticker, previousAsOf, asOf, eps],
+           set year = $3, quarter = $4, report_date = $5::date, eps = $6
+           where ticker = $1 and year = $2 and quarter = $7
+           returning year, quarter, report_date::text as report_date, eps::text as eps`,
+          [ticker, previous.year, earning.year, earning.quarter, earning.reportDate, earning.eps, previous.quarter],
         )
-      : await client.query<{ as_of: string; eps: string }>(
-          `insert into velquaris.earnings (ticker, as_of, eps)
-           values ($1, $2::date, $3)
-           returning as_of::text as as_of, eps::text as eps`,
-          [ticker, asOf, eps],
+      : await client.query<{ year: number; quarter: number; report_date: string; eps: string }>(
+          `insert into velquaris.earnings (ticker, year, quarter, report_date, eps)
+           values ($1, $2, $3, $4::date, $5)
+           returning year, quarter, report_date::text as report_date, eps::text as eps`,
+          [ticker, earning.year, earning.quarter, earning.reportDate, earning.eps],
         );
     const row = saved.rows[0];
     if (!row) {
@@ -213,7 +287,7 @@ export async function saveEarning(
     }
     await client.query("update velquaris.stocks set updated_at = now() where ticker = $1", [ticker]);
     await client.query("commit");
-    return { ok: true, asOf: row.as_of, eps: row.eps };
+    return { ok: true, year: row.year, quarter: row.quarter, reportDate: row.report_date, eps: row.eps };
   } catch (error) {
     await client.query("rollback");
     if (isUniqueViolation(error)) return { ok: false, reason: "conflict" };
@@ -245,8 +319,8 @@ export async function importHistory(parsed: ParsedHistory, replace: boolean): Pr
       await client.query("delete from velquaris.prices where ticker = any($1::text[])", [tickers]);
       await client.query("delete from velquaris.earnings where ticker = any($1::text[])", [tickers]);
     }
-    await insertSeries(client, "prices", "price", parsed.prices);
-    await insertSeries(client, "earnings", "eps", parsed.earnings);
+    await insertPrices(client, parsed.prices);
+    await insertEarnings(client, parsed.earnings);
     await client.query("commit");
   } catch (error) {
     await client.query("rollback");
@@ -256,14 +330,10 @@ export async function importHistory(parsed: ParsedHistory, replace: boolean): Pr
   }
 }
 
-async function history(
-  table: "prices" | "earnings",
-  column: "price" | "eps",
-  ticker: string,
-): Promise<HistoryPoint[]> {
+async function history(ticker: string): Promise<HistoryPoint[]> {
   const result = await pool.query<{ as_of: string; value: string }>(
-    `select as_of::text as as_of, ${column}::text as value
-     from velquaris.${table}
+    `select as_of::text as as_of, price::text as value
+     from velquaris.prices
      where ticker = $1
      order by as_of`,
     [ticker],
@@ -271,17 +341,45 @@ async function history(
   return result.rows.map((row) => ({ asOf: row.as_of, value: row.value }));
 }
 
-async function insertSeries(
-  client: pg.PoolClient,
-  table: "prices" | "earnings",
-  column: "price" | "eps",
-  points: SeriesPoint[],
-): Promise<void> {
+async function earningsFor(ticker: string): Promise<Earning[]> {
+  const result = await pool.query<{ year: number; quarter: number; report_date: string; value: string }>(
+    `select year, quarter, report_date::text as report_date, eps::text as value
+     from velquaris.earnings
+     where ticker = $1
+     order by year, quarter`,
+    [ticker],
+  );
+  return result.rows.map((row) => ({
+    year: row.year,
+    quarter: row.quarter,
+    reportDate: row.report_date,
+    value: row.value,
+  }));
+}
+
+async function insertPrices(client: pg.PoolClient, points: SeriesPoint[]): Promise<void> {
   if (points.length === 0) return;
   await client.query(
-    `insert into velquaris.${table} (ticker, as_of, ${column})
+    `insert into velquaris.prices (ticker, as_of, price)
      select * from unnest($1::text[], $2::date[], $3::numeric[])
-     on conflict (ticker, as_of) do update set ${column} = excluded.${column}`,
+     on conflict (ticker, as_of) do update set price = excluded.price`,
     [points.map((point) => point.ticker), points.map((point) => point.asOf), points.map((point) => point.value)],
+  );
+}
+
+async function insertEarnings(client: pg.PoolClient, points: EarningPoint[]): Promise<void> {
+  if (points.length === 0) return;
+  await client.query(
+    `insert into velquaris.earnings (ticker, year, quarter, report_date, eps)
+     select * from unnest($1::text[], $2::integer[], $3::integer[], $4::date[], $5::numeric[])
+     on conflict (ticker, year, quarter) do update
+       set report_date = excluded.report_date, eps = excluded.eps`,
+    [
+      points.map((point) => point.ticker),
+      points.map((point) => point.year),
+      points.map((point) => point.quarter),
+      points.map((point) => point.reportDate),
+      points.map((point) => point.value),
+    ],
   );
 }

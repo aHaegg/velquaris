@@ -1,6 +1,6 @@
 # velquaris
 
-Web app for stocks you keep in Supabase: price and quarterly earnings per share over time. P/E is the price divided by the sum of the last four EPS figures. A date with fewer than four quarters has no P/E. History is added by uploading `.csv` files, and a quarterly EPS can also be entered on the stock page.
+Web app for stocks you keep in Supabase: price and quarterly earnings per share over time. Each EPS row has a year, a quarter, and the report date, which is the day the report is released. P/E is the price divided by the sum of the last four EPS figures whose report date is on or before that price. A price with fewer than four reported quarters has no P/E. History is added by uploading `.csv` files, and a quarterly EPS can also be entered on the stock page.
 
 ## Local
 
@@ -21,9 +21,9 @@ Set `BOOTSTRAP_OTP` to four digits before the first start. Sign in as **Andreas*
 
 A Nasdaq historical-price export can be uploaded directly. It is semicolon-separated, starts with `sep=;`, and stores `Closing price`. The file has no ticker, so enter one on the upload form. A name like `hmb_20261028_202013.csv` is treated as `HMB` when the ticker box is empty.
 
-A table can use columns `ticker`, `date`, `price`, `eps`, and optional `name`. A row can leave price or EPS blank. Comma and semicolon files both work.
+A table can use columns `ticker`, `date`, `price`, `year`, `quarter`, `report_date`, `eps`, and optional `name`. A price row uses `date`. An EPS row uses `year`, `quarter`, and `report_date`. A row can leave price or EPS blank. If year and quarter are blank, they are taken from about two months before the report date. Comma and semicolon files both work.
 
-Uploading the same ticker and date again updates that point. “Replace existing history” deletes stored prices and EPS for the tickers in the file, then saves the file. P/E is not stored.
+Uploading the same ticker and date again updates that price. Uploading the same ticker, year, and quarter again updates that EPS. “Replace existing history” deletes stored prices and EPS for the tickers in the file, then saves the file. P/E is not stored.
 
 ## Render
 

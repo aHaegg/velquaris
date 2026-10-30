@@ -4,8 +4,8 @@ import { ApiError, getStock } from "../api";
 import { EpsTable } from "../components/EpsTable";
 import { Series } from "../components/Series";
 import { useTitle } from "../title";
-import type { StockHistory } from "../types";
-import { priceEarnings } from "../valuation";
+import type { HistoryPoint, StockHistory } from "../types";
+import { graphPriceEarnings, priceEarnings } from "../valuation";
 
 export function StockPage() {
   const { ticker = "" } = useParams();
@@ -68,6 +68,8 @@ export function StockPage() {
     );
   }
 
+  const earningsRatio = priceEarnings(stock.prices, stock.earnings);
+
   return (
     <>
       <header className="page-head">
@@ -81,13 +83,34 @@ export function StockPage() {
         <Series label="Price" points={stock.prices} color="#1e6b45" />
         <Series
           label="Earnings per share"
-          points={stock.earnings}
+          points={earningPoints(stock)}
           color="#8d3b2b"
+          quarterLines
+          quarterAt={(asOf) => {
+            const earning = stock.earnings.find((item) => item.reportDate === asOf);
+            return earning ? { year: earning.year, quarter: earning.quarter } : null;
+          }}
           details={<EpsTable stock={stock} onSaved={setStock} />}
         />
-        <Series label="P/E" points={priceEarnings(stock.prices, stock.earnings)} color="#1e4d78" />
+        <Series
+          label="P/E"
+          points={earningsRatio}
+          chartPoints={graphPriceEarnings(earningsRatio)}
+          quarterLines
+          axisFromZero
+          yStep={5}
+          color="#1e4d78"
+        />
       </div>
-      <p className="note">P/E is the closing price divided by the sum of the last four quarterly EPS figures on or before that date. Dates with fewer than four quarters have no P/E.</p>
+      <p className="note">
+        P/E is the closing price divided by the sum of the last four quarterly EPS figures whose report date is on or before that price date. A price has no P/E until four quarters have been reported. The graph leaves a gap where a P/E is more than 50% above or below the average of the previous two years. The gap is as long as the excluded points. The table lists every value.
+      </p>
     </>
   );
+}
+
+function earningPoints(stock: StockHistory): HistoryPoint[] {
+  return [...stock.earnings]
+    .sort((left, right) => left.reportDate.localeCompare(right.reportDate))
+    .map((earning) => ({ asOf: earning.reportDate, value: earning.value }));
 }

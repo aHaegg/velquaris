@@ -66,7 +66,7 @@ export function UploadPage() {
         </p>
         <p>
           A table can also use these columns. A row can leave price or EPS blank. Uploading the same ticker and date again updates that
-          point and leaves other dates in place.
+          price. Uploading the same ticker, year, and quarter again updates that EPS and its report date.
         </p>
         <div className="table-wrap">
           <table>
@@ -75,6 +75,9 @@ export function UploadPage() {
                 <th>ticker</th>
                 <th>date</th>
                 <th className="num">price</th>
+                <th>year</th>
+                <th>quarter</th>
+                <th>report date</th>
                 <th className="num">eps</th>
                 <th>name</th>
               </tr>
@@ -85,12 +88,18 @@ export function UploadPage() {
                 <td>2024-01-05</td>
                 <td className="num">181.18</td>
                 <td />
+                <td />
+                <td />
+                <td />
                 <td>Apple</td>
               </tr>
               <tr>
                 <td>AAPL</td>
-                <td>2024-03-30</td>
                 <td />
+                <td />
+                <td>2024</td>
+                <td>1</td>
+                <td>2024-04-26</td>
                 <td className="num">1.53</td>
                 <td />
               </tr>
@@ -98,8 +107,9 @@ export function UploadPage() {
           </table>
         </div>
         <p>
-          Dates can be <code>YYYY-MM-DD</code> or <code>DD.MM.YYYY</code>. Numbers can use a dot or a comma as the decimal separator.{" "}
-          <code>name</code> is optional. The delimiter can be a comma or a semicolon.
+          Dates can be <code>YYYY-MM-DD</code> or <code>DD.MM.YYYY</code>. The report date is the day the quarterly report is released.
+          If year and quarter are blank, they are taken from about two months before that report date. Numbers can use a dot or a comma
+          as the decimal separator. <code>name</code> is optional. The delimiter can be a comma or a semicolon.
         </p>
         <p>
           <a href="/template.csv">Download a template</a>. Delete the DEMO row before you upload it, or that sample will be saved.

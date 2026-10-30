@@ -84,7 +84,7 @@ export function StocksPage() {
                         {stock.name ? <span className="sub">{stock.name}</span> : null}
                       </td>
                       <Figure value={stock.price} date={stock.priceDate} />
-                      <Figure value={stock.eps} date={stock.epsDate} />
+                      <Figure value={stock.eps} date={stock.epsYear && stock.epsQuarter ? `${stock.epsYear} Q${stock.epsQuarter}` : null} />
                       <Figure value={pe.value} date={pe.date} />
                     </tr>
                   );
@@ -93,7 +93,7 @@ export function StocksPage() {
             </table>
           </div>
           <p className="note">
-            Price and EPS are the latest uploaded values. P/E is that price divided by the sum of the last four quarterly EPS figures on or before the price date. It is blank until four quarters are available.
+            Price is the latest close. EPS is the latest quarter. P/E is that price divided by the sum of the last four quarterly EPS figures whose report date is on or before the price date. It is blank until four quarters have been reported.
           </p>
         </>
       )}
