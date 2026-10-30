@@ -44,6 +44,23 @@ create table if not exists velquaris.earnings (
 
 drop table if exists velquaris.valuations;
 
+create table if not exists velquaris.users (
+  username text primary key,
+  role text not null check (role in ('admin', 'member')),
+  password_hash text,
+  otp_hash text,
+  created_at timestamptz not null default now(),
+  activated_at timestamptz
+);
+
+create unique index if not exists users_username_lower on velquaris.users (lower(username));
+
+create table if not exists velquaris.sessions (
+  id text primary key,
+  username text not null references velquaris.users (username) on delete cascade,
+  expires_at timestamptz not null
+);
+
 revoke all on schema velquaris from public;
 `;
 
@@ -154,6 +171,25 @@ export async function getStock(ticker: string): Promise<StockHistory | null> {
     history("earnings", "eps", ticker),
   ]);
   return { ticker: row.ticker, name: row.name, prices, earnings };
+}
+
+export async function saveEarning(
+  ticker: string,
+  asOf: string,
+  eps: number,
+): Promise<{ asOf: string; eps: string } | null> {
+  const saved = await pool.query<{ as_of: string; eps: string }>(
+    `insert into velquaris.earnings (ticker, as_of, eps)
+     select $1, $2::date, $3
+     where exists (select 1 from velquaris.stocks where ticker = $1)
+     on conflict (ticker, as_of) do update set eps = excluded.eps
+     returning as_of::text as as_of, eps::text as eps`,
+    [ticker, asOf, eps],
+  );
+  const row = saved.rows[0];
+  if (!row) return null;
+  await pool.query("update velquaris.stocks set updated_at = now() where ticker = $1", [ticker]);
+  return { asOf: row.as_of, eps: row.eps };
 }
 
 export async function importHistory(parsed: ParsedHistory, replace: boolean): Promise<void> {

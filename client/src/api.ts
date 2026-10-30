@@ -1,4 +1,4 @@
-import type { StockHistory, StockSummary, UploadFeedback, UploadPolicy } from "./types";
+import type { AccountStatus, Member, SessionUser, StockHistory, StockSummary, UploadFeedback } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -17,8 +17,40 @@ export function getStock(ticker: string): Promise<StockHistory> {
   return getJson<StockHistory>(`/api/stocks/${encodeURIComponent(ticker)}`);
 }
 
-export function getUploadPolicy(): Promise<UploadPolicy> {
-  return getJson<{ policy: UploadPolicy }>("/api/upload").then((body) => body.policy);
+export function saveEarning(ticker: string, asOf: string, eps: string): Promise<{ asOf: string; eps: string }> {
+  return postJson(`/api/stocks/${encodeURIComponent(ticker)}/earnings`, { asOf, eps });
+}
+
+export async function currentUser(): Promise<SessionUser | null> {
+  const response = await fetch("/api/auth/me");
+  if (response.status === 401) return null;
+  if (!response.ok) throw new ApiError("Sign in could not be checked.", response.status);
+  return response.json() as Promise<SessionUser>;
+}
+
+export function lookupAccount(username: string): Promise<{ status: AccountStatus }> {
+  return postJson("/api/auth/lookup", { username });
+}
+
+export function activateAccount(username: string, otp: string, password: string): Promise<SessionUser> {
+  return postJson("/api/auth/activate", { username, otp, password });
+}
+
+export function login(username: string, password: string): Promise<SessionUser> {
+  return postJson("/api/auth/login", { username, password });
+}
+
+export async function logout(): Promise<void> {
+  const response = await fetch("/api/auth/logout", { method: "POST" });
+  if (!response.ok) throw new ApiError("Could not sign out.", response.status);
+}
+
+export function listMembers(): Promise<Member[]> {
+  return getJson("/api/admin/users");
+}
+
+export function inviteMember(username: string, otp: string): Promise<{ username: string; otp: string; replaced: boolean }> {
+  return postJson("/api/admin/invites", { username, otp });
 }
 
 export async function uploadCsv(form: FormData): Promise<UploadFeedback> {
@@ -28,6 +60,19 @@ export async function uploadCsv(form: FormData): Promise<UploadFeedback> {
     throw new ApiError("The upload could not be read.", response.status);
   }
   return body;
+}
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new ApiError(messageFrom(payload) ?? "The request failed.", response.status);
+  }
+  return payload as T;
 }
 
 async function getJson<T>(path: string): Promise<T> {

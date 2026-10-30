@@ -1,13 +1,27 @@
-import { timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import express from "express";
 import multer from "multer";
-import { port, uploadPolicy, uploadSecret, type UploadPolicy } from "./config.js";
-import { getStock, importHistory, listStocks, migrate, pingDatabase, pool } from "./db.js";
-import { buildTemplate, canonicalTicker, parseCsv, type ParseIssue } from "./csv.js";
+import {
+  activateAccount,
+  canonicalUsername,
+  createInvite,
+  endSession,
+  ensureAdminInvite,
+  isOtp,
+  listUsers,
+  loginWithPassword,
+  lookupLogin,
+  openSession,
+  userFromRequest,
+  type SessionUser,
+} from "./auth.js";
+import { port } from "./config.js";
+import { getStock, importHistory, listStocks, migrate, pingDatabase, pool, saveEarning } from "./db.js";
+import { buildTemplate, canonicalTicker, parseAmount, parseCsv, type ParseIssue } from "./csv.js";
 
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 const clientDir = path.join(process.cwd(), "dist/client");
+const devServer = import.meta.url.endsWith(".ts");
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -23,6 +37,7 @@ type UploadFeedback = {
 
 const app = express();
 app.disable("x-powered-by");
+app.use(express.json({ limit: "20kb" }));
 
 app.get("/health", async (_req, res) => {
   try {
@@ -34,7 +49,91 @@ app.get("/health", async (_req, res) => {
   }
 });
 
-app.get("/api/stocks", async (_req, res) => {
+app.post("/api/auth/lookup", async (req, res) => {
+  const username = canonicalUsername(textField(req.body?.username));
+  if (!username) {
+    res.status(400).json({ message: "Enter a username." });
+    return;
+  }
+  const status = await lookupLogin(username);
+  if (!status) {
+    res.status(404).json({ message: "That username does not have an invite." });
+    return;
+  }
+  res.json({ status });
+});
+
+app.post("/api/auth/activate", async (req, res) => {
+  const username = canonicalUsername(textField(req.body?.username));
+  const otp = textField(req.body?.otp);
+  const password = textField(req.body?.password);
+  if (!username || !isOtp(otp)) {
+    res.status(400).json({ message: "Enter your username and the four-digit one-time password." });
+    return;
+  }
+  const result = await activateAccount(username, otp, password);
+  if (!result.ok) {
+    res.status(result.status).json({ message: result.message });
+    return;
+  }
+  await openSession(res, result.user);
+  res.json(publicUser(result.user));
+});
+
+app.post("/api/auth/login", async (req, res) => {
+  const username = canonicalUsername(textField(req.body?.username));
+  const password = textField(req.body?.password);
+  if (!username || !password) {
+    res.status(400).json({ message: "Enter your username and password." });
+    return;
+  }
+  const user = await loginWithPassword(username, password);
+  if (!user) {
+    res.status(401).json({ message: "The username or password is wrong." });
+    return;
+  }
+  await openSession(res, user);
+  res.json(publicUser(user));
+});
+
+app.post("/api/auth/logout", async (req, res) => {
+  await endSession(req, res);
+  res.json({ ok: true });
+});
+
+app.get("/api/auth/me", async (req, res) => {
+  const user = await userFromRequest(req);
+  if (!user) {
+    res.status(401).json({ message: "Sign in to continue." });
+    return;
+  }
+  res.json(publicUser(user));
+});
+
+app.get("/api/admin/users", requireAdmin, async (_req, res) => {
+  res.json(await listUsers());
+});
+
+app.post("/api/admin/invites", requireAdmin, async (req, res) => {
+  const username = canonicalUsername(textField(req.body?.username));
+  const otp = textField(req.body?.otp);
+  if (!username) {
+    res.status(400).json({ message: "Enter a username. Start with a letter." });
+    return;
+  }
+  if (!isOtp(otp)) {
+    res.status(400).json({ message: "The one-time password must be four digits." });
+    return;
+  }
+  const result = await createInvite(username, otp);
+  if (!result.ok) {
+    res.status(409).json({ message: result.message });
+    return;
+  }
+  res.status(result.replaced ? 200 : 201).json({ username, otp, replaced: result.replaced });
+});
+
+app.get("/api/stocks", requireAuth, async (_req, res) => {
   try {
     res.json(await listStocks());
   } catch (error) {
@@ -43,7 +142,7 @@ app.get("/api/stocks", async (_req, res) => {
   }
 });
 
-app.get("/api/stocks/:ticker", async (req, res) => {
+app.get("/api/stocks/:ticker", requireAuth, async (req, res) => {
   const ticker = canonicalTicker(routeParam(req.params.ticker));
   if (!ticker) {
     res.status(404).json({ message: "That stock is not in Velquaris." });
@@ -62,18 +161,35 @@ app.get("/api/stocks/:ticker", async (req, res) => {
   }
 });
 
-app.get("/api/upload", (_req, res) => {
-  res.json({ policy: uploadPolicy() satisfies UploadPolicy });
+app.post("/api/stocks/:ticker/earnings", requireAuth, async (req, res) => {
+  const ticker = canonicalTicker(routeParam(req.params.ticker));
+  const asOf = isoDate(textField(req.body?.asOf));
+  const eps = parseAmount(textField(req.body?.eps));
+  if (!ticker || !asOf || eps === null) {
+    res.status(400).json({ message: "Choose a quarter and enter an EPS value." });
+    return;
+  }
+  try {
+    const saved = await saveEarning(ticker, asOf, eps);
+    if (!saved) {
+      res.status(404).json({ message: "That stock is not in Velquaris." });
+      return;
+    }
+    res.json(saved);
+  } catch (error) {
+    console.error(errorMessage(error));
+    res.status(500).json({ message: "The EPS value could not be saved." });
+  }
 });
 
-app.get("/template.csv", (_req, res) => {
+app.get("/template.csv", requireAuth, (_req, res) => {
   res
     .type("text/csv; charset=utf-8")
     .set("Content-Disposition", 'attachment; filename="velquaris-template.csv"')
     .send(buildTemplate());
 });
 
-app.post("/api/upload", (req, res, next) => {
+app.post("/api/upload", requireAuth, (req, res, next) => {
   upload.single("file")(req, res, (error) => {
     if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
       res.status(400).json(bad("That file is larger than 15 MB."));
@@ -91,17 +207,26 @@ app.use("/api", (_req, res) => {
   res.status(404).json({ message: "Not found" });
 });
 
-app.use(express.static(clientDir));
-
-app.use((req, res, next) => {
-  if (req.method !== "GET" && req.method !== "HEAD") {
-    next();
-    return;
-  }
-  res.sendFile(path.join(clientDir, "index.html"), (error) => {
-    if (error) next();
+if (devServer) {
+  app.use((_req, res) => {
+    res
+      .status(404)
+      .type("html")
+      .send("<!doctype html><p>The local site is at <a href=\"http://localhost:5173\">http://localhost:5173</a>.</p>");
   });
-});
+} else {
+  app.use(express.static(clientDir));
+
+  app.use((req, res, next) => {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      next();
+      return;
+    }
+    res.sendFile(path.join(clientDir, "index.html"), (error) => {
+      if (error) next();
+    });
+  });
+}
 
 app.use((_req, res) => {
   res.status(404).json({ message: "Not found" });
@@ -113,17 +238,37 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
   res.status(500).json(bad("The upload could not be saved."));
 });
 
-async function receiveUpload(req: express.Request, res: express.Response): Promise<void> {
-  const policy = uploadPolicy();
-  if (policy === "disabled") {
-    res.status(403).json(bad("Uploads are turned off until UPLOAD_SECRET is set."));
-    return;
-  }
-  if (policy === "secret" && !secretMatches(field(req.body?.secret), uploadSecret() ?? "")) {
-    res.status(401).json(bad("The upload secret is wrong."));
-    return;
-  }
+async function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction): Promise<void> {
+  await requireRole(req, res, next, null);
+}
 
+async function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction): Promise<void> {
+  await requireRole(req, res, next, "admin");
+}
+
+async function requireRole(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction,
+  role: SessionUser["role"] | null,
+): Promise<void> {
+  try {
+    const user = await userFromRequest(req);
+    if (!user) {
+      res.status(401).json({ message: "Sign in to continue." });
+      return;
+    }
+    if (role && user.role !== role) {
+      res.status(403).json({ message: "Only an admin can invite people." });
+      return;
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function receiveUpload(req: express.Request, res: express.Response): Promise<void> {
   const file = req.file;
   if (!file || !file.originalname.toLowerCase().endsWith(".csv")) {
     res.status(400).json(bad("Choose a .csv file."));
@@ -138,7 +283,7 @@ async function receiveUpload(req: express.Request, res: express.Response): Promi
   try {
     parsed = parseCsv(file.buffer, {
       filename: file.originalname,
-      ticker: field(req.body?.ticker),
+      ticker: textField(req.body?.ticker),
     });
   } catch (error) {
     console.error(errorMessage(error));
@@ -159,7 +304,7 @@ async function receiveUpload(req: express.Request, res: express.Response): Promi
   }
 
   try {
-    await importHistory(parsed, field(req.body?.replace) === "1");
+    await importHistory(parsed, textField(req.body?.replace) === "1");
   } catch (error) {
     console.error(errorMessage(error));
     res.status(500).json(bad("The rows could not be saved."));
@@ -191,14 +336,25 @@ function bad(summary: string): UploadFeedback {
   return { tone: "bad", summary, tickers: [], issues: [] };
 }
 
-function secretMatches(provided: string, expected: string): boolean {
-  const left = Buffer.from(provided);
-  const right = Buffer.from(expected);
-  if (left.length !== right.length || left.length === 0) return false;
-  return timingSafeEqual(left, right);
+function publicUser(user: SessionUser): SessionUser {
+  return { username: user.username, role: user.role };
 }
 
-function field(value: unknown): string {
+function isoDate(value: string): string | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 1900 || year > 2200) return null;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    return null;
+  }
+  return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
+function textField(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value) && typeof value[0] === "string") return value[0];
   return "";
@@ -222,19 +378,28 @@ async function start(): Promise<ReturnType<typeof app.listen>> {
   const db = await pingDatabase();
   console.log(`connected to database ${db.database}`);
   await migrate();
+  await ensureAdminInvite();
   return app.listen(port(), () => {
     console.log(`velquaris listening on ${port()}`);
+    if (devServer) console.log("Open http://localhost:5173");
   });
 }
 
+let stopping = false;
+
 async function shutdown(): Promise<void> {
-  server.close();
+  if (stopping) return;
+  stopping = true;
+  await new Promise<void>((resolve) => {
+    server.close(() => resolve());
+  });
   await pool.end();
+  process.exit(0);
 }
 
-process.on("SIGTERM", () => {
+process.once("SIGTERM", () => {
   void shutdown();
 });
-process.on("SIGINT", () => {
+process.once("SIGINT", () => {
   void shutdown();
 });

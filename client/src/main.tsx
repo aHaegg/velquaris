@@ -1,6 +1,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
 import { App } from "./App";
+import { AuthProvider } from "./auth";
 import "./styles.css";
 
 const root = document.querySelector("#root");
@@ -8,6 +10,10 @@ if (!root) throw new Error("Missing #root");
 
 createRoot(root).render(
   <StrictMode>
-    <App />
+    <BrowserRouter>
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    </BrowserRouter>
   </StrictMode>,
 );

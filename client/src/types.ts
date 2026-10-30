@@ -20,7 +20,18 @@ export type StockHistory = {
   earnings: HistoryPoint[];
 };
 
-export type UploadPolicy = "open" | "secret" | "disabled";
+export type SessionUser = {
+  username: string;
+  role: "admin" | "member";
+};
+
+export type AccountStatus = "invite" | "active";
+
+export type Member = {
+  username: string;
+  role: SessionUser["role"];
+  status: "invited" | "active";
+};
 
 export type UploadFeedback = {
   tone: "ok" | "warn" | "bad";

@@ -1,29 +1,13 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { getUploadPolicy, uploadCsv } from "../api";
+import { uploadCsv } from "../api";
 import { useTitle } from "../title";
-import type { UploadFeedback, UploadPolicy } from "../types";
+import type { UploadFeedback } from "../types";
 
 export function UploadPage() {
   useTitle("Upload");
-  const [policy, setPolicy] = useState<UploadPolicy | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<UploadFeedback | null>(null);
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    getUploadPolicy()
-      .then((value) => {
-        if (!cancelled) setPolicy(value);
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : "The upload form could not be loaded.");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -52,25 +36,7 @@ export function UploadPage() {
         <p>Add tickers and historical prices and quarterly earnings per share. P/E is the price divided by the sum of the last four quarters.</p>
       </header>
       {feedback ? <Feedback feedback={feedback} /> : null}
-      {error ? (
-        <section className="banner bad">
-          <p>{error}</p>
-        </section>
-      ) : null}
-      {policy === null && !error ? (
-        <section className="panel">
-          <p>Loading…</p>
-        </section>
-      ) : null}
-      {policy === "disabled" ? (
-        <section className="panel">
-          <p>
-            Uploads are turned off until <code>UPLOAD_SECRET</code> is set on the server.
-          </p>
-        </section>
-      ) : null}
-      {policy === "open" || policy === "secret" ? (
-        <form className="panel form" onSubmit={onSubmit}>
+      <form className="panel form" onSubmit={onSubmit}>
           <label>
             Ticker
             <input type="text" name="ticker" maxLength={16} autoCapitalize="characters" spellCheck={false} placeholder="HMB" />
@@ -82,12 +48,6 @@ export function UploadPage() {
             CSV file
             <input type="file" name="file" accept=".csv,text/csv" required />
           </label>
-          {policy === "secret" ? (
-            <label>
-              Upload secret
-              <input type="password" name="secret" autoComplete="current-password" required />
-            </label>
-          ) : null}
           <label className="check">
             <input type="checkbox" name="replace" value="1" />
             Replace existing history for tickers in this file
@@ -96,7 +56,6 @@ export function UploadPage() {
             {busy ? "Uploading…" : "Upload"}
           </button>
         </form>
-      ) : null}
       <section className="panel">
         <h2>File format</h2>
         <p>

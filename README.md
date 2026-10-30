@@ -1,6 +1,6 @@
 # velquaris
 
-Web app for stocks you keep in Supabase: price and quarterly earnings per share over time. P/E is the price divided by the sum of the last four EPS figures. A date with fewer than four quarters has no P/E. History is added by uploading `.csv` files.
+Web app for stocks you keep in Supabase: price and quarterly earnings per share over time. P/E is the price divided by the sum of the last four EPS figures. A date with fewer than four quarters has no P/E. History is added by uploading `.csv` files, and a quarterly EPS can also be entered on the stock page.
 
 ## Local
 
@@ -12,6 +12,8 @@ npm run dev
 ```
 
 Open http://localhost:5173. The Vite app proxies API requests to the server on port 3000. `GET /health` checks the database.
+
+Set `BOOTSTRAP_OTP` to four digits before the first start. Sign in as **Andreas** with that one-time password and choose your own password. Andreas is the admin. From People, invite someone by choosing their username and a four-digit one-time password, then tell them both. The first time they sign in, they enter that code and choose their own password.
 
 `npm run build` compiles the server and the React app. `npm start` serves both from port 3000.
 
@@ -25,6 +27,6 @@ Uploading the same ticker and date again updates that point. “Replace existing
 
 ## Render
 
-`render.yaml` defines the web service. Set `DATABASE_URL` to the Supabase session pooler URI (port 5432) from **Connect** at the top of the project. That host is IPv4. Also set `UPLOAD_SECRET`; without it, production uploads stay off.
+`render.yaml` defines the web service. Set `DATABASE_URL` to the Supabase session pooler URI (port 5432) from **Connect** at the top of the project. That host is IPv4. Set `BOOTSTRAP_OTP` to four digits before the first deploy so Andreas can sign in. After that sign-in, the one-time password is no longer used.
 
 Tables are created in the `velquaris` schema.

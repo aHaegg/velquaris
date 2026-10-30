@@ -19,15 +19,11 @@ export function port(): number {
   return value;
 }
 
-export function uploadSecret(): string | null {
-  const secret = process.env.UPLOAD_SECRET?.trim();
-  return secret ? secret : null;
-}
-
-export type UploadPolicy = "open" | "secret" | "disabled";
-
-export function uploadPolicy(): UploadPolicy {
-  if (uploadSecret()) return "secret";
-  if (process.env.NODE_ENV === "production") return "disabled";
-  return "open";
+export function bootstrapOtp(): string | null {
+  const otp = process.env.BOOTSTRAP_OTP?.trim() ?? "";
+  if (!otp) return null;
+  if (!/^\d{4}$/.test(otp)) {
+    throw new Error("BOOTSTRAP_OTP must be four digits.");
+  }
+  return otp;
 }

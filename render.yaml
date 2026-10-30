@@ -11,5 +11,5 @@ services:
     envVars:
       - key: DATABASE_URL
         sync: false
-      - key: UPLOAD_SECRET
+      - key: BOOTSTRAP_OTP
         sync: false

@@ -385,6 +385,12 @@ function parseMetric(value: string): number | null | "invalid" {
   return parsed === null ? "invalid" : parsed;
 }
 
+export function parseAmount(value: string): number | null {
+  const text = value.trim();
+  if (!text) return null;
+  return parseLocaleNumber(text);
+}
+
 function parseLocaleNumber(value: string): number | null {
   let normalized = value.replace(/[\s\u00a0"]/g, "");
   if (normalized.includes(",") && normalized.includes(".")) {

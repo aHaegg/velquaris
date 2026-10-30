@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ApiError, getStock } from "../api";
+import { EpsForm } from "../components/EpsForm";
 import { Series } from "../components/Series";
 import { useTitle } from "../title";
 import type { StockHistory } from "../types";
@@ -76,6 +77,7 @@ export function StockPage() {
         <h1>{stock.ticker}</h1>
         {stock.name ? <p>{stock.name}</p> : null}
       </header>
+      <EpsForm stock={stock} onSaved={setStock} />
       <div className="series-list">
         <Series label="Price" points={stock.prices} color="#1e6b45" />
         <Series label="Earnings per share" points={stock.earnings} color="#8d3b2b" />
