@@ -224,6 +224,12 @@ th {
   font-family: "SF Mono", ui-monospace, monospace;
 }
 
+.chart-cap {
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-dasharray: 1 4.5;
+}
+
 .eps-row {
   display: flex;
   flex-wrap: wrap;

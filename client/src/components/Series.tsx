@@ -13,6 +13,7 @@ export function Series({
   axisFromZero,
   yStep,
   note,
+  caps,
 }: {
   label: string;
   points: HistoryPoint[];
@@ -24,6 +25,7 @@ export function Series({
   axisFromZero?: boolean;
   yStep?: number;
   note?: string;
+  caps?: ChartCap[];
 }) {
   const caption =
     points.length === 0
@@ -53,6 +55,7 @@ export function Series({
           quarterAt={quarterAt}
           axisFromZero={axisFromZero}
           yStep={yStep}
+          caps={caps}
         />
       )}
       {details}
@@ -89,6 +92,7 @@ function LineChart({
   quarterAt,
   axisFromZero,
   yStep,
+  caps,
 }: {
   points: HistoryPoint[];
   slots?: HistoryPoint[];
@@ -98,6 +102,7 @@ function LineChart({
   quarterAt?: (asOf: string) => { year: number; quarter: number } | null;
   axisFromZero?: boolean;
   yStep?: number;
+  caps?: ChartCap[];
 }) {
   if (points.length === 0) return <p className="empty">No {label.toLowerCase()} history yet.</p>;
 
@@ -124,6 +129,7 @@ function LineChart({
     axis.length === 1 ? pad.left + plotWidth / 2 : pad.left + (index / (axis.length - 1)) * plotWidth;
   const yAt = (value: number) => pad.top + ((max - value) / (max - min)) * plotHeight;
   const runs = chartRuns(axis, points);
+  const capLines = capSegments(axis, points, caps ?? [], xAt, max, min, yAt, plotWidth);
   const quarters = quarterLines ? quarterMarks(axis, quarterAt) : [];
   const ticks = yStep && yStep > 0 ? yTicks(min, max, yStep) : [];
   const quarterLabels = labeledQuarters(quarters, xAt, pad.left);
@@ -160,6 +166,14 @@ function LineChart({
       {ticks.length === 0 && axisFromZero && min >= 0 ? (
         <line x1={pad.left} y1={bottom} x2={width - pad.right} y2={bottom} stroke="#e2d8c8" />
       ) : null}
+      {capLines.map((cap) => (
+        <g key={cap.key}>
+          <title>{cap.side === "high" ? `${label} above the scale` : `${label} below the scale`}</title>
+          {cap.joints.map((joint) => (
+            <line key={joint.key} className="chart-cap" stroke={color} x1={joint.x1} y1={joint.y1} x2={joint.x2} y2={joint.y2} />
+          ))}
+        </g>
+      ))}
       {runs.map((run) => {
         const coordinates = run.map(
           (item) => `${xAt(item.index).toFixed(1)},${yAt(Number(item.point.value)).toFixed(1)}`,
@@ -253,6 +267,72 @@ function calendarQuarter(asOf: string): { year: number; quarter: number } | null
   const year = Number(asOf.slice(0, 4));
   if (month < 1 || month > 12 || year < 1900) return null;
   return { year, quarter: Math.ceil(month / 3) };
+}
+
+type ChartCap = {
+  from: string;
+  to: string;
+  side: "high" | "low";
+};
+
+function capSegments(
+  axis: HistoryPoint[],
+  plotted: HistoryPoint[],
+  caps: ChartCap[],
+  xAt: (index: number) => number,
+  max: number,
+  min: number,
+  yAt: (value: number) => number,
+  plotWidth: number,
+): Array<{ key: string; side: ChartCap["side"]; joints: Array<{ key: string; x1: number; y1: number; x2: number; y2: number }> }> {
+  const indexByDate = new Map(axis.map((point, index) => [point.asOf, index]));
+  const plottedDates = new Set(plotted.map((point) => point.asOf));
+  const step = axis.length <= 1 ? plotWidth : plotWidth / (axis.length - 1);
+  const plotLeft = xAt(0) - (axis.length <= 1 ? plotWidth / 2 : 0);
+  const plotRight = axis.length <= 1 ? plotLeft + plotWidth : xAt(axis.length - 1);
+  const segments: Array<{ key: string; side: ChartCap["side"]; joints: Array<{ key: string; x1: number; y1: number; x2: number; y2: number }> }> = [];
+  for (let index = 0; index < caps.length; index += 1) {
+    const cap = caps[index];
+    if (!cap) continue;
+    const start = indexByDate.get(cap.from);
+    const end = indexByDate.get(cap.to);
+    if (start === undefined || end === undefined) continue;
+    const from = Math.min(start, end);
+    const to = Math.max(start, end);
+    const capY = cap.side === "high" ? yAt(max) : yAt(min);
+    const before = neighborPoint(axis, from - 1, plottedDates);
+    const after = neighborPoint(axis, to + 1, plottedDates);
+    const next = caps[index + 1];
+    const nextStart = next ? indexByDate.get(next.from) : undefined;
+    const switches = next !== undefined && next.side !== cap.side && nextStart === to + 1;
+    let x1 = before ? xAt(before.index) : xAt(from);
+    let x2 = after ? xAt(after.index) : xAt(switches ? to + 1 : to);
+    if (!switches && x2 - x1 < step) {
+      const mid = (x1 + x2) / 2;
+      x1 = Math.max(plotLeft, mid - step / 2);
+      x2 = Math.min(plotRight, mid + step / 2);
+    }
+    const key = `${cap.from}-${cap.to}-${cap.side}`;
+    const joints = [{ key: `${key}-level`, x1, y1: capY, x2, y2: capY }];
+    if (before) joints.push({ key: `${key}-before`, x1: xAt(before.index), y1: yAt(Number(before.point.value)), x2: xAt(before.index), y2: capY });
+    if (after) joints.push({ key: `${key}-after`, x1: xAt(after.index), y1: capY, x2: xAt(after.index), y2: yAt(Number(after.point.value)) });
+    if (switches && next) {
+      const otherY = next.side === "high" ? yAt(max) : yAt(min);
+      joints.push({ key: `${key}-switch`, x1: xAt(to + 1), y1: capY, x2: xAt(to + 1), y2: otherY });
+    }
+    segments.push({ key, side: cap.side, joints });
+  }
+  return segments;
+}
+
+function neighborPoint(
+  axis: HistoryPoint[],
+  index: number,
+  plottedDates: Set<string>,
+): { point: HistoryPoint; index: number } | null {
+  const point = axis[index];
+  if (!point || !plottedDates.has(point.asOf)) return null;
+  return { point, index };
 }
 
 function chartRuns(

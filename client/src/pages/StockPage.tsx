@@ -71,6 +71,7 @@ export function StockPage() {
   }
 
   const earningsRatio = priceEarnings(stock.prices, stock.earnings, stock.splits);
+  const earningsGraph = graphPriceEarnings(earningsRatio);
 
   return (
     <>
@@ -103,7 +104,8 @@ export function StockPage() {
         <Series
           label="P/E"
           points={earningsRatio}
-          chartPoints={graphPriceEarnings(earningsRatio)}
+          chartPoints={earningsGraph.visible}
+          caps={earningsGraph.caps}
           quarterLines
           axisFromZero
           yStep={5}
@@ -111,7 +113,7 @@ export function StockPage() {
         />
       </div>
       <p className="note">
-        The EPS graph uses split-adjusted EPS. Reported EPS stays as entered, and adjusted EPS divides it by every split dated after the report. P/E is the closing price divided by the sum of the last four adjusted quarterly EPS figures whose report date is on or before that price date. A price has no P/E until four quarters have been reported. The P/E graph leaves a gap where a P/E is more than 50% above or below the average of the previous two years. The gap is as long as the excluded points. The P/E table lists every value.
+        The EPS graph uses split-adjusted EPS. Reported EPS stays as entered, and adjusted EPS divides it by every split dated after the report. P/E is the closing price divided by the sum of the last four adjusted quarterly EPS figures whose report date is on or before that price date. A price has no P/E until four quarters have been reported. Where a P/E is more than 50% above the average of the previous two years, the graph draws a dotted line at the top of the scale and joins it to the last plotted value before that stretch and the next one after it. Where it is more than 50% below, the line is at the bottom. A stretch that switches from the top to the bottom, or the other way, is joined by a vertical dotted line. The line lasts as long as those points. The P/E table lists every value.
       </p>
     </>
   );

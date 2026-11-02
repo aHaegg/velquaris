@@ -42,12 +42,25 @@ function comparePeriod(left: Earning, right: Earning): number {
   return left.year - right.year || left.quarter - right.quarter;
 }
 
-export function graphPriceEarnings(points: HistoryPoint[]): HistoryPoint[] {
+export type PriceEarningsCap = {
+  from: string;
+  to: string;
+  side: "high" | "low";
+};
+
+export function graphPriceEarnings(points: HistoryPoint[]): { visible: HistoryPoint[]; caps: PriceEarningsCap[] } {
   const sorted = [...points].sort((left, right) => left.asOf.localeCompare(right.asOf));
   let start = 0;
   let sum = 0;
   let count = 0;
   const visible: HistoryPoint[] = [];
+  const caps: PriceEarningsCap[] = [];
+  let cap: PriceEarningsCap | null = null;
+  const finishCap = () => {
+    if (!cap) return;
+    caps.push(cap);
+    cap = null;
+  };
   for (let index = 0; index < sorted.length; index += 1) {
     const point = sorted[index];
     if (!point) continue;
@@ -59,13 +72,24 @@ export function graphPriceEarnings(points: HistoryPoint[]): HistoryPoint[] {
     }
     const value = Number(point.value);
     const average = count > 0 ? sum / count : null;
-    if (average === null || !Number.isFinite(value) || !isExtreme(value, average)) visible.push(point);
+    if (average !== null && Number.isFinite(value) && isExtreme(value, average)) {
+      const side = value > average ? "high" : "low";
+      if (cap && cap.side === side) cap.to = point.asOf;
+      else {
+        finishCap();
+        cap = { from: point.asOf, to: point.asOf, side };
+      }
+    } else {
+      finishCap();
+      visible.push(point);
+    }
     if (Number.isFinite(value)) {
       sum += value;
       count += 1;
     }
   }
-  return visible;
+  finishCap();
+  return { visible, caps };
 }
 
 function isExtreme(value: number, average: number): boolean {
