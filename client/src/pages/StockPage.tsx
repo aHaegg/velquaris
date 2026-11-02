@@ -3,6 +3,8 @@ import { Link, useParams } from "react-router-dom";
 import { ApiError, getStock } from "../api";
 import { EpsTable } from "../components/EpsTable";
 import { Series } from "../components/Series";
+import { SplitsEditor } from "../components/SplitsEditor";
+import { adjustedEpsNumber } from "../splits";
 import { useTitle } from "../title";
 import type { HistoryPoint, StockHistory } from "../types";
 import { graphPriceEarnings, priceEarnings } from "../valuation";
@@ -68,7 +70,7 @@ export function StockPage() {
     );
   }
 
-  const earningsRatio = priceEarnings(stock.prices, stock.earnings);
+  const earningsRatio = priceEarnings(stock.prices, stock.earnings, stock.splits);
 
   return (
     <>
@@ -83,6 +85,7 @@ export function StockPage() {
         <Series label="Price" points={stock.prices} color="#1e6b45" />
         <Series
           label="Earnings per share"
+          note={stock.splits.length > 0 ? "The graph uses adjusted EPS." : undefined}
           points={earningPoints(stock)}
           color="#8d3b2b"
           quarterLines
@@ -90,7 +93,12 @@ export function StockPage() {
             const earning = stock.earnings.find((item) => item.reportDate === asOf);
             return earning ? { year: earning.year, quarter: earning.quarter } : null;
           }}
-          details={<EpsTable stock={stock} onSaved={setStock} />}
+          details={
+            <>
+              <SplitsEditor stock={stock} onSaved={setStock} />
+              <EpsTable stock={stock} onSaved={setStock} />
+            </>
+          }
         />
         <Series
           label="P/E"
@@ -103,7 +111,7 @@ export function StockPage() {
         />
       </div>
       <p className="note">
-        P/E is the closing price divided by the sum of the last four quarterly EPS figures whose report date is on or before that price date. A price has no P/E until four quarters have been reported. The graph leaves a gap where a P/E is more than 50% above or below the average of the previous two years. The gap is as long as the excluded points. The table lists every value.
+        The EPS graph uses split-adjusted EPS. Reported EPS stays as entered, and adjusted EPS divides it by every split dated after the report. P/E is the closing price divided by the sum of the last four adjusted quarterly EPS figures whose report date is on or before that price date. A price has no P/E until four quarters have been reported. The P/E graph leaves a gap where a P/E is more than 50% above or below the average of the previous two years. The gap is as long as the excluded points. The P/E table lists every value.
       </p>
     </>
   );
@@ -111,6 +119,9 @@ export function StockPage() {
 
 function earningPoints(stock: StockHistory): HistoryPoint[] {
   return [...stock.earnings]
-    .sort((left, right) => left.reportDate.localeCompare(right.reportDate))
-    .map((earning) => ({ asOf: earning.reportDate, value: earning.value }));
+    .sort((left, right) => left.reportDate.localeCompare(right.reportDate) || left.year - right.year || left.quarter - right.quarter)
+    .map((earning) => ({
+      asOf: earning.reportDate,
+      value: String(adjustedEpsNumber(earning.value, earning.reportDate, stock.splits)),
+    }));
 }

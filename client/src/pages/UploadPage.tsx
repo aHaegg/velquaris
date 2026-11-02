@@ -116,7 +116,7 @@ export function UploadPage() {
         </p>
         <p>
           Check “Replace existing history” when the file should become the full history for those tickers. That removes prices and EPS
-          already stored for them.
+          already stored for them. Stock splits entered on the stock page stay.
         </p>
       </section>
     </>

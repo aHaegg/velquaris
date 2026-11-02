@@ -1,4 +1,5 @@
-import type { Earning, HistoryPoint } from "./types";
+import { adjustedEpsNumber } from "./splits";
+import type { Earning, HistoryPoint, Split } from "./types";
 
 const ROLLING_QUARTERS = 4;
 
@@ -6,18 +7,19 @@ export function latestPriceEarnings(
   price: string | null,
   priceDate: string | null,
   earnings: Earning[],
+  splits: Split[] = [],
 ): { value: string | null; date: string | null } {
   if (!price || !priceDate) return { value: null, date: null };
-  const point = priceEarnings([{ asOf: priceDate, value: price }], earnings)[0];
+  const point = priceEarnings([{ asOf: priceDate, value: price }], earnings, splits)[0];
   return point ? { value: point.value, date: priceDate } : { value: null, date: null };
 }
 
-export function priceEarnings(prices: HistoryPoint[], earnings: Earning[]): HistoryPoint[] {
+export function priceEarnings(prices: HistoryPoint[], earnings: Earning[], splits: Split[] = []): HistoryPoint[] {
   const ordered = [...earnings].sort(comparePeriod);
   const points: HistoryPoint[] = [];
   for (const price of prices) {
     const known = ordered.filter((earning) => earning.reportDate <= price.asOf);
-    const sum = trailingSum(known);
+    const sum = trailingSum(known, splits);
     const priceValue = Number(price.value);
     if (sum === null || sum === 0 || !Number.isFinite(priceValue)) continue;
     points.push({ asOf: price.asOf, value: String(priceValue / sum) });
@@ -25,11 +27,11 @@ export function priceEarnings(prices: HistoryPoint[], earnings: Earning[]): Hist
   return points;
 }
 
-function trailingSum(earnings: Earning[]): number | null {
+function trailingSum(earnings: Earning[], splits: Split[]): number | null {
   if (earnings.length < ROLLING_QUARTERS) return null;
   let sum = 0;
   for (const earning of earnings.slice(-ROLLING_QUARTERS)) {
-    const value = Number(earning.value);
+    const value = adjustedEpsNumber(earning.value, earning.reportDate, splits);
     if (!Number.isFinite(value)) return null;
     sum += value;
   }

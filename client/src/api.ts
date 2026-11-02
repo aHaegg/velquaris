@@ -1,4 +1,4 @@
-import type { AccountStatus, Member, SessionUser, StockHistory, StockSummary, UploadFeedback } from "./types";
+import type { AccountStatus, Member, SessionUser, Split, StockHistory, StockSummary, UploadFeedback } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -15,6 +15,23 @@ export function getStocks(): Promise<StockSummary[]> {
 
 export function getStock(ticker: string): Promise<StockHistory> {
   return getJson<StockHistory>(`/api/stocks/${encodeURIComponent(ticker)}`);
+}
+
+export function saveSplit(
+  ticker: string,
+  split: { date: string; newShares: number; oldShares: number; previousDate?: string },
+): Promise<Split> {
+  return postJson(`/api/stocks/${encodeURIComponent(ticker)}/splits`, split);
+}
+
+export async function deleteSplit(ticker: string, date: string): Promise<void> {
+  const response = await fetch(`/api/stocks/${encodeURIComponent(ticker)}/splits/${encodeURIComponent(date)}`, {
+    method: "DELETE",
+  });
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new ApiError(messageFrom(payload) ?? "The stock split could not be removed.", response.status);
+  }
 }
 
 export function saveEarning(

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { ApiError, getStock, saveEarning } from "../api";
 import { formatNumber } from "../format";
-import { listMissingQuarters, periodKey, periodLabel } from "../quarters";
+import { listMissingQuarters, periodKey } from "../quarters";
+import { adjustedEpsNumber } from "../splits";
 import type { Earning, StockHistory } from "../types";
 
 type EpsTableProps = {
@@ -112,6 +113,7 @@ export function EpsTable({ stock, onSaved }: EpsTableProps) {
               <th>Quarter</th>
               <th>Report date</th>
               <th className="num">EPS</th>
+              {stock.splits.length > 0 ? <th className="num">Adjusted EPS</th> : null}
               <th></th>
             </tr>
           </thead>
@@ -158,6 +160,11 @@ export function EpsTable({ stock, onSaved }: EpsTableProps) {
                       autoComplete="off"
                     />
                   </td>
+                  {stock.splits.length > 0 ? (
+                    <td className="num">
+                      {formatNumber(eps.trim() && reportDate ? adjustedEpsNumber(eps, reportDate, stock.splits) : Number.NaN)}
+                    </td>
+                  ) : null}
                   <td>
                     <div className="eps-row">
                       <button type="button" className="small" onClick={() => void saveEdit(point)} disabled={busy}>
@@ -175,6 +182,9 @@ export function EpsTable({ stock, onSaved }: EpsTableProps) {
                   <td>Q{point.quarter}</td>
                   <td>{point.reportDate}</td>
                   <td className="num">{formatNumber(point.value)}</td>
+                  {stock.splits.length > 0 ? (
+                    <td className="num">{formatNumber(adjustedEpsNumber(point.value, point.reportDate, stock.splits))}</td>
+                  ) : null}
                   <td>
                     <button type="button" className="text-button" onClick={() => startEdit(point)}>
                       Edit
@@ -185,13 +195,13 @@ export function EpsTable({ stock, onSaved }: EpsTableProps) {
             )}
             {missing.length === 0 ? (
               <tr>
-                <td colSpan={5}>
+                <td colSpan={stock.splits.length > 0 ? 6 : 5}>
                   <span className="hint">Every quarter in this range already has an EPS value.</span>
                 </td>
               </tr>
             ) : (
               <tr>
-                <td colSpan={5}>
+                <td colSpan={stock.splits.length > 0 ? 6 : 5}>
                   <div className="eps-row">
                     <select
                       className="period-select"

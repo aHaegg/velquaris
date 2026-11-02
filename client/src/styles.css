@@ -247,6 +247,22 @@ th {
 .series td input[type="number"] { width: 5.5rem; min-width: 0; }
 .series td select { min-width: 4.5rem; }
 .series .eps-row select.period-select { min-width: 8rem; }
+.series .eps-row input.share-input {
+  width: 4.2rem;
+  min-width: 0;
+}
+
+.split-editor { margin: 0.2rem 0 1.2rem; }
+.split-editor h3 {
+  margin: 0;
+  font-family: "Iowan Old Style", Palatino, Georgia, serif;
+  font-size: 1.35rem;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+}
+.split-editor > .hint { margin: 0.3rem 0 0.7rem; }
+.split-editor .banner { margin-bottom: 0.7rem; }
+.ratio-word { color: var(--muted); }
 
 button.small {
   padding: 0.35rem 0.7rem;

@@ -1,6 +1,6 @@
 # velquaris
 
-Web app for stocks you keep in Supabase: price and quarterly earnings per share over time. Each EPS row has a year, a quarter, and the report date, which is the day the report is released. P/E is the price divided by the sum of the last four EPS figures whose report date is on or before that price. A price with fewer than four reported quarters has no P/E. History is added by uploading `.csv` files, and a quarterly EPS can also be entered on the stock page.
+Web app for stocks you keep in Supabase: price, quarterly earnings per share, and stock splits. Each EPS row has a year, a quarter, and the report date, which is the day the report is released. Prices are stored as imported, already adjusted for splits. EPS is stored as reported. A stock split on the stock page, such as 4 for 1, divides every EPS reported before that date by 4. Later splits multiply. The stock page shows the reported EPS and the adjusted EPS. The EPS graph and P/E use the adjusted figures. P/E is the price divided by the sum of the last four adjusted EPS figures whose report date is on or before that price. A price with fewer than four reported quarters has no P/E. History is added by uploading `.csv` files, and a quarterly EPS or a stock split can also be entered on the stock page.
 
 ## Local
 
@@ -23,7 +23,7 @@ A Nasdaq historical-price export can be uploaded directly. It is semicolon-separ
 
 A table can use columns `ticker`, `date`, `price`, `year`, `quarter`, `report_date`, `eps`, and optional `name`. A price row uses `date`. An EPS row uses `year`, `quarter`, and `report_date`. A row can leave price or EPS blank. If year and quarter are blank, they are taken from about two months before the report date. Comma and semicolon files both work.
 
-Uploading the same ticker and date again updates that price. Uploading the same ticker, year, and quarter again updates that EPS. “Replace existing history” deletes stored prices and EPS for the tickers in the file, then saves the file. P/E is not stored.
+Uploading the same ticker and date again updates that price. Uploading the same ticker, year, and quarter again updates that EPS. “Replace existing history” deletes stored prices and EPS for the tickers in the file, then saves the file. Stock splits stay. P/E is not stored.
 
 ## Render
 

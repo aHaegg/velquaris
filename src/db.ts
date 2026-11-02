@@ -45,6 +45,15 @@ create table if not exists velquaris.earnings (
   check (quarter between 1 and 4)
 );
 
+create table if not exists velquaris.splits (
+  ticker text not null references velquaris.stocks (ticker) on delete cascade,
+  split_date date not null,
+  new_shares integer not null,
+  old_shares integer not null,
+  primary key (ticker, split_date),
+  check (new_shares > 0 and old_shares > 0 and new_shares <> old_shares)
+);
+
 drop table if exists velquaris.valuations;
 
 create table if not exists velquaris.users (
@@ -72,6 +81,12 @@ export type DatabaseStatus = {
   user: string;
 };
 
+export type Split = {
+  date: string;
+  newShares: number;
+  oldShares: number;
+};
+
 export type StockSummary = {
   ticker: string;
   name: string | null;
@@ -81,6 +96,7 @@ export type StockSummary = {
   epsYear: number | null;
   epsQuarter: number | null;
   earnings: Earning[];
+  splits: Split[];
 };
 
 export type HistoryPoint = {
@@ -100,6 +116,7 @@ export type StockHistory = {
   name: string | null;
   prices: HistoryPoint[];
   earnings: Earning[];
+  splits: Split[];
 };
 
 type StockRow = {
@@ -218,6 +235,7 @@ export async function listStocks(): Promise<StockSummary[]> {
     });
     earningsByTicker.set(row.ticker, points);
   }
+  const splitsByTicker = await listSplits();
   return result.rows.map((row) => ({
     ticker: row.ticker,
     name: row.name,
@@ -227,6 +245,7 @@ export async function listStocks(): Promise<StockSummary[]> {
     epsYear: row.eps_year,
     epsQuarter: row.eps_quarter,
     earnings: earningsByTicker.get(row.ticker) ?? [],
+    splits: splitsByTicker.get(row.ticker) ?? [],
   }));
 }
 
@@ -237,8 +256,8 @@ export async function getStock(ticker: string): Promise<StockHistory | null> {
   );
   const row = stock.rows[0];
   if (!row) return null;
-  const [prices, earnings] = await Promise.all([history(ticker), earningsFor(ticker)]);
-  return { ticker: row.ticker, name: row.name, prices, earnings };
+  const [prices, earnings, splits] = await Promise.all([history(ticker), earningsFor(ticker), splitsFor(ticker)]);
+  return { ticker: row.ticker, name: row.name, prices, earnings, splits };
 }
 
 export type EarningInput = {
@@ -301,6 +320,83 @@ function isUniqueViolation(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "23505";
 }
 
+export type SplitInput = {
+  date: string;
+  newShares: number;
+  oldShares: number;
+};
+
+export type SavedSplit =
+  | { ok: true; date: string; newShares: number; oldShares: number }
+  | { ok: false; reason: "missing" | "conflict" };
+
+export async function saveSplit(
+  ticker: string,
+  split: SplitInput,
+  previousDate: string | null,
+): Promise<SavedSplit> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const stock = await client.query("select 1 from velquaris.stocks where ticker = $1", [ticker]);
+    if ((stock.rowCount ?? 0) === 0) {
+      await client.query("rollback");
+      return { ok: false, reason: "missing" };
+    }
+    const saved = previousDate
+      ? await client.query<{ split_date: string; new_shares: number; old_shares: number }>(
+          `update velquaris.splits
+           set split_date = $3::date, new_shares = $4, old_shares = $5
+           where ticker = $1 and split_date = $2::date
+           returning split_date::text as split_date, new_shares, old_shares`,
+          [ticker, previousDate, split.date, split.newShares, split.oldShares],
+        )
+      : await client.query<{ split_date: string; new_shares: number; old_shares: number }>(
+          `insert into velquaris.splits (ticker, split_date, new_shares, old_shares)
+           values ($1, $2::date, $3, $4)
+           returning split_date::text as split_date, new_shares, old_shares`,
+          [ticker, split.date, split.newShares, split.oldShares],
+        );
+    const row = saved.rows[0];
+    if (!row) {
+      await client.query("rollback");
+      return { ok: false, reason: "missing" };
+    }
+    await client.query("update velquaris.stocks set updated_at = now() where ticker = $1", [ticker]);
+    await client.query("commit");
+    return { ok: true, ...mapSplit(row) };
+  } catch (error) {
+    await client.query("rollback");
+    if (isUniqueViolation(error)) return { ok: false, reason: "conflict" };
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function deleteSplit(ticker: string, date: string): Promise<boolean> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const removed = await client.query("delete from velquaris.splits where ticker = $1 and split_date = $2::date", [
+      ticker,
+      date,
+    ]);
+    if ((removed.rowCount ?? 0) === 0) {
+      await client.query("rollback");
+      return false;
+    }
+    await client.query("update velquaris.stocks set updated_at = now() where ticker = $1", [ticker]);
+    await client.query("commit");
+    return true;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function importHistory(parsed: ParsedHistory, replace: boolean): Promise<void> {
   const client = await pool.connect();
   try {
@@ -339,6 +435,41 @@ async function history(ticker: string): Promise<HistoryPoint[]> {
     [ticker],
   );
   return result.rows.map((row) => ({ asOf: row.as_of, value: row.value }));
+}
+
+async function listSplits(): Promise<Map<string, Split[]>> {
+  const result = await pool.query<{
+    ticker: string;
+    split_date: string;
+    new_shares: number;
+    old_shares: number;
+  }>(`
+    select ticker, split_date::text as split_date, new_shares, old_shares
+    from velquaris.splits
+    order by ticker, split_date
+  `);
+  const splitsByTicker = new Map<string, Split[]>();
+  for (const row of result.rows) {
+    const splits = splitsByTicker.get(row.ticker) ?? [];
+    splits.push(mapSplit(row));
+    splitsByTicker.set(row.ticker, splits);
+  }
+  return splitsByTicker;
+}
+
+async function splitsFor(ticker: string): Promise<Split[]> {
+  const result = await pool.query<{ split_date: string; new_shares: number; old_shares: number }>(
+    `select split_date::text as split_date, new_shares, old_shares
+     from velquaris.splits
+     where ticker = $1
+     order by split_date`,
+    [ticker],
+  );
+  return result.rows.map((row) => mapSplit(row));
+}
+
+function mapSplit(row: { split_date: string; new_shares: number; old_shares: number }): Split {
+  return { date: row.split_date, newShares: Number(row.new_shares), oldShares: Number(row.old_shares) };
 }
 
 async function earningsFor(ticker: string): Promise<Earning[]> {

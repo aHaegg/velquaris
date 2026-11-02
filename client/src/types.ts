@@ -1,3 +1,9 @@
+export type Split = {
+  date: string;
+  newShares: number;
+  oldShares: number;
+};
+
 export type StockSummary = {
   ticker: string;
   name: string | null;
@@ -7,6 +13,7 @@ export type StockSummary = {
   epsYear: number | null;
   epsQuarter: number | null;
   earnings: Earning[];
+  splits: Split[];
 };
 
 export type HistoryPoint = {
@@ -26,6 +33,7 @@ export type StockHistory = {
   name: string | null;
   prices: HistoryPoint[];
   earnings: Earning[];
+  splits: Split[];
 };
 
 export type SessionUser = {

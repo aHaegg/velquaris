@@ -16,7 +16,17 @@ import {
   type SessionUser,
 } from "./auth.js";
 import { port } from "./config.js";
-import { getStock, importHistory, listStocks, migrate, pingDatabase, pool, saveEarning } from "./db.js";
+import {
+  deleteSplit,
+  getStock,
+  importHistory,
+  listStocks,
+  migrate,
+  pingDatabase,
+  pool,
+  saveEarning,
+  saveSplit,
+} from "./db.js";
 import { buildTemplate, canonicalTicker, parseAmount, parseCsv, type ParseIssue } from "./csv.js";
 
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
@@ -196,6 +206,62 @@ app.post("/api/stocks/:ticker/earnings", requireAuth, async (req, res) => {
   }
 });
 
+app.post("/api/stocks/:ticker/splits", requireAuth, async (req, res) => {
+  const ticker = canonicalTicker(routeParam(req.params.ticker));
+  const date = isoDate(textField(req.body?.date));
+  const previousDateText = textField(req.body?.previousDate);
+  const previousDate = previousDateText ? isoDate(previousDateText) : null;
+  const newShares = shareCount(req.body?.newShares);
+  const oldShares = shareCount(req.body?.oldShares);
+  if (newShares && oldShares && newShares === oldShares) {
+    res.status(400).json({ message: "New and old shares are the same, so that is not a split." });
+    return;
+  }
+  if (!ticker || !date || (previousDateText && !previousDate) || !newShares || !oldShares) {
+    res.status(400).json({
+      message: "Enter the split date, the new shares, and the old shares. For a 4-for-1 split, use 4 and 1.",
+    });
+    return;
+  }
+  try {
+    const saved = await saveSplit(ticker, { date, newShares, oldShares }, previousDate);
+    if (!saved.ok && saved.reason === "conflict") {
+      res.status(409).json({ message: "That date already has a stock split." });
+      return;
+    }
+    if (!saved.ok) {
+      res.status(404).json({
+        message: previousDate ? "That stock split is no longer there." : "That stock is not in Velquaris.",
+      });
+      return;
+    }
+    res.json({ date: saved.date, newShares: saved.newShares, oldShares: saved.oldShares });
+  } catch (error) {
+    console.error(errorMessage(error));
+    res.status(500).json({ message: "The stock split could not be saved." });
+  }
+});
+
+app.delete("/api/stocks/:ticker/splits/:date", requireAuth, async (req, res) => {
+  const ticker = canonicalTicker(routeParam(req.params.ticker));
+  const date = isoDate(routeParam(req.params.date));
+  if (!ticker || !date) {
+    res.status(404).json({ message: "That stock split is no longer there." });
+    return;
+  }
+  try {
+    const removed = await deleteSplit(ticker, date);
+    if (!removed) {
+      res.status(404).json({ message: "That stock split is no longer there." });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    console.error(errorMessage(error));
+    res.status(500).json({ message: "The stock split could not be removed." });
+  }
+});
+
 app.get("/template.csv", requireAuth, (_req, res) => {
   res
     .type("text/csv; charset=utf-8")
@@ -363,6 +429,13 @@ function yearField(value: string): number | null {
 function quarterField(value: string): number | null {
   const quarter = Number(value.trim());
   return quarter === 1 || quarter === 2 || quarter === 3 || quarter === 4 ? quarter : null;
+}
+
+function shareCount(value: unknown): number | null {
+  const text = textField(value).trim();
+  if (!/^[1-9]\d{0,6}$/.test(text)) return null;
+  const shares = Number(text);
+  return shares <= 1_000_000 ? shares : null;
 }
 
 function isoDate(value: string): string | null {

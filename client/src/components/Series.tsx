@@ -12,6 +12,7 @@ export function Series({
   quarterAt,
   axisFromZero,
   yStep,
+  note,
 }: {
   label: string;
   points: HistoryPoint[];
@@ -22,6 +23,7 @@ export function Series({
   quarterAt?: (asOf: string) => { year: number; quarter: number } | null;
   axisFromZero?: boolean;
   yStep?: number;
+  note?: string;
 }) {
   const caption =
     points.length === 0
@@ -34,7 +36,10 @@ export function Series({
     <section className="series">
       <header>
         <h2>{label}</h2>
-        <p>{caption}</p>
+        <p>
+          {caption}
+          {note ? <span className="asof">{note}</span> : null}
+        </p>
       </header>
       {plotted.length === 0 && points.length > 0 ? (
         <p className="empty">Every value in this range is outside the scale of the graph.</p>

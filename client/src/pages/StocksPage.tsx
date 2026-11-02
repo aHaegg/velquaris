@@ -74,7 +74,7 @@ export function StocksPage() {
               </thead>
               <tbody>
                 {stocks.map((stock) => {
-                  const pe = latestPriceEarnings(stock.price, stock.priceDate, stock.earnings);
+                  const pe = latestPriceEarnings(stock.price, stock.priceDate, stock.earnings, stock.splits);
                   return (
                     <tr key={stock.ticker}>
                       <td>
@@ -93,7 +93,7 @@ export function StocksPage() {
             </table>
           </div>
           <p className="note">
-            Price is the latest close. EPS is the latest quarter. P/E is that price divided by the sum of the last four quarterly EPS figures whose report date is on or before the price date. It is blank until four quarters have been reported.
+            Price is the latest close. EPS is the latest quarter, as reported. P/E is that price divided by the sum of the last four quarterly EPS figures, adjusted for later stock splits, whose report date is on or before the price date. It is blank until four quarters have been reported.
           </p>
         </>
       )}
