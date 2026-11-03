@@ -14,6 +14,8 @@ export function Series({
   yStep,
   note,
   caps,
+  formatValue = formatNumber,
+  yRange,
 }: {
   label: string;
   points: HistoryPoint[];
@@ -26,6 +28,8 @@ export function Series({
   yStep?: number;
   note?: string;
   caps?: ChartCap[];
+  formatValue?: (value: string | number | null) => string;
+  yRange?: { min: number; max: number };
 }) {
   const caption =
     points.length === 0
@@ -43,7 +47,7 @@ export function Series({
           {note ? <span className="asof">{note}</span> : null}
         </p>
       </header>
-      {plotted.length === 0 && points.length > 0 ? (
+      {plotted.length === 0 && points.length > 0 && !yRange ? (
         <p className="empty">Every value in this range is outside the scale of the graph.</p>
       ) : (
         <LineChart
@@ -56,6 +60,8 @@ export function Series({
           axisFromZero={axisFromZero}
           yStep={yStep}
           caps={caps}
+          formatValue={formatValue}
+          yRange={yRange}
         />
       )}
       {details}
@@ -72,7 +78,7 @@ export function Series({
               {latestFirst.map((point) => (
                 <tr key={point.asOf}>
                   <td>{point.asOf}</td>
-                  <td className="num">{formatNumber(point.value)}</td>
+                  <td className="num">{formatValue(point.value)}</td>
                 </tr>
               ))}
             </tbody>
@@ -93,6 +99,8 @@ function LineChart({
   axisFromZero,
   yStep,
   caps,
+  formatValue,
+  yRange,
 }: {
   points: HistoryPoint[];
   slots?: HistoryPoint[];
@@ -103,26 +111,30 @@ function LineChart({
   axisFromZero?: boolean;
   yStep?: number;
   caps?: ChartCap[];
+  formatValue: (value: string | number | null) => string;
+  yRange?: { min: number; max: number };
 }) {
-  if (points.length === 0) return <p className="empty">No {label.toLowerCase()} history yet.</p>;
-
   const axis = slots ?? points;
+  if (axis.length === 0) return <p className="empty">No {label.toLowerCase()} history yet.</p>;
+
   const width = 760;
   const height = 220;
   const pad = { left: 72, right: 16, top: 16, bottom: quarterLines ? 32 : 16 };
-  const values = points.map((point) => Number(point.value));
-  const dataMin = Math.min(...values);
-  const dataMax = Math.max(...values);
-  let min = dataMin;
-  let max = dataMax;
-  if (min === max) {
+  const values = points.map((point) => Number(point.value)).filter((value) => Number.isFinite(value));
+  const dataMin = values.length > 0 ? Math.min(...values) : 0;
+  const dataMax = values.length > 0 ? Math.max(...values) : 0;
+  let min = yRange ? yRange.min : dataMin;
+  let max = yRange ? yRange.max : dataMax;
+  if (!yRange && min === max) {
     min -= 1;
     max += 1;
   }
-  if (axisFromZero) min = Math.min(0, dataMin);
-  const span = max - min || 1;
-  max += span * 0.08;
-  if (!axisFromZero || min < 0) min -= span * 0.08;
+  if (!yRange && axisFromZero) min = Math.min(0, dataMin);
+  if (!yRange) {
+    const span = max - min || 1;
+    max += span * 0.08;
+    if (!axisFromZero || min < 0) min -= span * 0.08;
+  }
   const plotWidth = width - pad.left - pad.right;
   const plotHeight = height - pad.top - pad.bottom;
   const xAt = (index: number) =>
@@ -156,7 +168,7 @@ function LineChart({
         <g key={tick}>
           <line x1={pad.left} y1={yAt(tick)} x2={width - pad.right} y2={yAt(tick)} stroke="#e2d8c8" />
           <text x={pad.left - 8} y={tickLabelY(yAt(tick), pad.top, bottom)} textAnchor="end">
-            {formatNumber(tick)}
+            {formatValue(tick)}
           </text>
         </g>
       ))}
@@ -197,12 +209,12 @@ function LineChart({
         : null}
       {ticks.length > 0 ? null : (
         <text x={pad.left - 8} y={Math.max(12, yAt(dataMax))} textAnchor="end">
-          {formatNumber(dataMax)}
+          {formatValue(dataMax)}
         </text>
       )}
       {ticks.length > 0 || (dataMin === dataMax && !axisFromZero) ? null : (
         <text x={pad.left - 8} y={Math.min(bottom - 2, yAt(axisFromZero ? Math.min(0, dataMin) : dataMin))} textAnchor="end">
-          {formatNumber(axisFromZero ? Math.min(0, dataMin) : dataMin)}
+          {formatValue(axisFromZero ? Math.min(0, dataMin) : dataMin)}
         </text>
       )}
     </svg>

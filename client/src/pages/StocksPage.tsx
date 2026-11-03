@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { getStocks } from "../api";
-import { formatNumber } from "../format";
+import { formatNumber, formatPercent } from "../format";
 import { useTitle } from "../title";
 import type { StockSummary } from "../types";
-import { latestPriceEarnings } from "../valuation";
+import { latestPegRatio, latestPriceEarnings, latestTtmEpsGrowth } from "../valuation";
 
 export function StocksPage() {
   useTitle("Stocks");
@@ -69,12 +69,16 @@ export function StocksPage() {
                   <th>Ticker</th>
                   <th className="num">Price</th>
                   <th className="num">EPS</th>
+                  <th className="num">TTM EPS growth</th>
                   <th className="num">P/E</th>
+                  <th className="num">PEG</th>
                 </tr>
               </thead>
               <tbody>
                 {stocks.map((stock) => {
                   const pe = latestPriceEarnings(stock.price, stock.priceDate, stock.earnings, stock.splits);
+                  const growth = latestTtmEpsGrowth(stock.earnings, stock.splits);
+                  const peg = latestPegRatio(stock.price, stock.priceDate, stock.earnings, stock.splits);
                   return (
                     <tr key={stock.ticker}>
                       <td>
@@ -85,7 +89,13 @@ export function StocksPage() {
                       </td>
                       <Figure value={stock.price} date={stock.priceDate} />
                       <Figure value={stock.eps} date={stock.epsYear && stock.epsQuarter ? `${stock.epsYear} Q${stock.epsQuarter}` : null} />
+                      <Figure
+                        value={growth.value}
+                        date={growth.year !== null && growth.quarter !== null ? `${growth.year} Q${growth.quarter}` : null}
+                        format={formatPercent}
+                      />
                       <Figure value={pe.value} date={pe.date} />
+                      <Figure value={peg.value} date={peg.date} />
                     </tr>
                   );
                 })}
@@ -93,7 +103,7 @@ export function StocksPage() {
             </table>
           </div>
           <p className="note">
-            Price is the latest close. EPS is the latest quarter, as reported. P/E is that price divided by the sum of the last four quarterly EPS figures, adjusted for later stock splits, whose report date is on or before the price date. It is blank until four quarters have been reported.
+            Price is the latest close. EPS is the latest quarter, as reported. TTM EPS growth is the change from the four split-adjusted quarters a year earlier to the latest four quarters in a row. It is blank until those eight quarters have been reported, and the date under it is the newest quarter in that window. P/E is the latest price divided by the sum of the last four quarterly EPS figures, adjusted for later stock splits, whose report date is on or before the price date. It is blank until four quarters have been reported. PEG is that P/E divided by the TTM EPS growth rate in percent, so a P/E of 15 and growth of 15% is a PEG of 1. It is blank when that growth is missing or not positive.
           </p>
         </>
       )}
@@ -101,7 +111,15 @@ export function StocksPage() {
   );
 }
 
-function Figure({ value, date }: { value: string | null; date: string | null }) {
+function Figure({
+  value,
+  date,
+  format = formatNumber,
+}: {
+  value: string | null;
+  date: string | null;
+  format?: (value: string | number | null) => string;
+}) {
   if (value === null) {
     return (
       <td className="num">
@@ -111,7 +129,7 @@ function Figure({ value, date }: { value: string | null; date: string | null }) 
   }
   return (
     <td className="num">
-      <span className="figure">{formatNumber(value)}</span>
+      <span className="figure">{format(value)}</span>
       {date ? <span className="asof">{date}</span> : null}
     </td>
   );
