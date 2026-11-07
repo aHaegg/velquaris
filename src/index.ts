@@ -180,10 +180,15 @@ app.post("/api/stocks/:ticker/earnings", requireAuth, async (req, res) => {
   const previousQuarterText = textField(req.body?.previousQuarter);
   const previousYear = previousYearText ? yearField(previousYearText) : null;
   const previousQuarter = previousQuarterText ? quarterField(previousQuarterText) : null;
-  const eps = parseAmount(textField(req.body?.eps));
+  const epsText = textField(req.body?.eps).trim();
+  const eps = epsText ? parseAmount(epsText) : null;
   const previousPair = previousYearText !== "" || previousQuarterText !== "";
-  if (!ticker || !year || !quarter || !reportDate || eps === null || (previousPair && (!previousYear || !previousQuarter))) {
-    res.status(400).json({ message: "Enter a year, a quarter, a report date, and an EPS value." });
+  if (epsText && eps === null) {
+    res.status(400).json({ message: "Enter the EPS as a number." });
+    return;
+  }
+  if (!ticker || !year || !quarter || !reportDate || (previousPair && (!previousYear || !previousQuarter))) {
+    res.status(400).json({ message: "Enter a year, a quarter, and a report date." });
     return;
   }
   try {
@@ -191,6 +196,18 @@ app.post("/api/stocks/:ticker/earnings", requireAuth, async (req, res) => {
     const saved = await saveEarning(ticker, { year, quarter, reportDate, eps }, previous);
     if (!saved.ok && saved.reason === "conflict") {
       res.status(409).json({ message: "That year and quarter already have an EPS value." });
+      return;
+    }
+    if (!saved.ok && saved.reason === "pending") {
+      res.status(409).json({ message: "A report date without an EPS value is already saved." });
+      return;
+    }
+    if (!saved.ok && saved.reason === "later") {
+      res.status(409).json({ message: "Set the EPS on the upcoming report before adding a later quarter." });
+      return;
+    }
+    if (!saved.ok && saved.reason === "eps") {
+      res.status(400).json({ message: "Enter an EPS value." });
       return;
     }
     if (!saved.ok) {

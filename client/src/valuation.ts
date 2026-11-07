@@ -15,7 +15,7 @@ export function latestPriceEarnings(
 }
 
 export function priceEarnings(prices: HistoryPoint[], earnings: Earning[], splits: Split[] = []): HistoryPoint[] {
-  const ordered = [...earnings].sort(comparePeriod);
+  const ordered = reportedEarnings(earnings).sort(comparePeriod);
   const points: HistoryPoint[] = [];
   for (const price of prices) {
     const known = ordered.filter((earning) => earning.reportDate <= price.asOf);
@@ -27,7 +27,7 @@ export function priceEarnings(prices: HistoryPoint[], earnings: Earning[], split
   return points;
 }
 
-function trailingSum(earnings: Earning[], splits: Split[]): number | null {
+function trailingSum(earnings: Array<Earning & { value: string }>, splits: Split[]): number | null {
   if (earnings.length < ROLLING_QUARTERS) return null;
   let sum = 0;
   for (const earning of earnings.slice(-ROLLING_QUARTERS)) {
@@ -61,8 +61,8 @@ function growthPoints(
   earnings: Earning[],
   splits: Split[],
 ): Array<HistoryPoint & { year: number; quarter: number }> {
-  const byPeriod = new Map<number, Earning>();
-  for (const earning of earnings) {
+  const byPeriod = new Map<number, Earning & { value: string }>();
+  for (const earning of reportedEarnings(earnings)) {
     if (earning.quarter < 1 || earning.quarter > 4) continue;
     byPeriod.set(periodIndex(earning.year, earning.quarter), earning);
   }
@@ -83,7 +83,13 @@ function growthPoints(
   return points;
 }
 
-function ttmSum(byPeriod: Map<number, Earning>, end: number, splits: Split[]): number | null {
+function reportedEarnings(earnings: Earning[]): Array<Earning & { value: string }> {
+  return earnings.filter((earning): earning is Earning & { value: string } => {
+    return earning.value !== null && earning.value !== "" && Number.isFinite(Number(earning.value));
+  });
+}
+
+function ttmSum(byPeriod: Map<number, Earning & { value: string }>, end: number, splits: Split[]): number | null {
   let sum = 0;
   for (let offset = 0; offset < ROLLING_QUARTERS; offset += 1) {
     const earning = byPeriod.get(end - offset);

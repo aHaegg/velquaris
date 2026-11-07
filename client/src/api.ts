@@ -44,7 +44,7 @@ export function saveEarning(
     previousYear?: number;
     previousQuarter?: number;
   },
-): Promise<{ year: number; quarter: number; reportDate: string; eps: string }> {
+): Promise<{ year: number; quarter: number; reportDate: string; eps: string | null }> {
   return postJson(`/api/stocks/${encodeURIComponent(ticker)}/earnings`, earning);
 }
 

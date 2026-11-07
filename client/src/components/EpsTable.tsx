@@ -56,6 +56,14 @@ export function EpsTable({ stock, onSaved }: EpsTableProps) {
     const nextYear = Number(year);
     const nextQuarter = Number(quarter);
     if (!Number.isInteger(nextYear) || !Number.isInteger(nextQuarter)) return;
+    if (!reportDate) {
+      setError("Enter a report date.");
+      return;
+    }
+    if (!canOmitEps(nextYear, nextQuarter, reportDate, point) && !eps.trim()) {
+      setError("Enter an EPS value.");
+      return;
+    }
     await persist({
       year: nextYear,
       quarter: nextQuarter,
@@ -71,7 +79,29 @@ export function EpsTable({ stock, onSaved }: EpsTableProps) {
     const nextYear = Number(yearText);
     const nextQuarter = Number(quarterText);
     if (!Number.isInteger(nextYear) || !Number.isInteger(nextQuarter)) return;
+    if (!reportDate) {
+      setError("Enter a report date.");
+      return;
+    }
+    if (!canOmitEps(nextYear, nextQuarter, reportDate) && !eps.trim()) {
+      setError("Enter an EPS value.");
+      return;
+    }
     await persist({ year: nextYear, quarter: nextQuarter, reportDate, eps });
+  }
+
+  function canOmitEps(
+    nextYear: number,
+    nextQuarter: number,
+    nextReportDate: string,
+    ignore?: { year: number; quarter: number },
+  ): boolean {
+    if (nextReportDate < isoToday()) return false;
+    const others = stock.earnings.filter(
+      (earning) => !ignore || earning.year !== ignore.year || earning.quarter !== ignore.quarter,
+    );
+    if (others.some((earning) => earning.value === null)) return false;
+    return others.every((earning) => earning.year < nextYear || (earning.year === nextYear && earning.quarter < nextQuarter));
   }
 
   async function persist(earning: {
@@ -97,6 +127,11 @@ export function EpsTable({ stock, onSaved }: EpsTableProps) {
       setBusy(false);
     }
   }
+
+  const selectedPeriod = selectedPeriodFrom(selectedMissing);
+  const epsRequiredForAdd = selectedPeriod
+    ? !canOmitEps(selectedPeriod.year, selectedPeriod.quarter, reportDate)
+    : true;
 
   return (
     <>
@@ -156,7 +191,7 @@ export function EpsTable({ stock, onSaved }: EpsTableProps) {
                       aria-label="EPS"
                       value={eps}
                       onChange={(event) => setEps(event.target.value)}
-                      required
+                      required={!canOmitEps(Number(year), Number(quarter), reportDate, point)}
                       autoComplete="off"
                     />
                   </td>
@@ -183,7 +218,9 @@ export function EpsTable({ stock, onSaved }: EpsTableProps) {
                   <td>{point.reportDate}</td>
                   <td className="num">{formatNumber(point.value)}</td>
                   {stock.splits.length > 0 ? (
-                    <td className="num">{formatNumber(adjustedEpsNumber(point.value, point.reportDate, stock.splits))}</td>
+                    <td className="num">
+                      {point.value === null ? "—" : formatNumber(adjustedEpsNumber(point.value, point.reportDate, stock.splits))}
+                    </td>
                   ) : null}
                   <td>
                     <button type="button" className="text-button" onClick={() => startEdit(point)}>
@@ -196,7 +233,7 @@ export function EpsTable({ stock, onSaved }: EpsTableProps) {
             {missing.length === 0 ? (
               <tr>
                 <td colSpan={stock.splits.length > 0 ? 6 : 5}>
-                  <span className="hint">Every quarter in this range already has an EPS value.</span>
+                  <span className="hint">Every quarter in this range is already listed.</span>
                 </td>
               </tr>
             ) : (
@@ -205,7 +242,7 @@ export function EpsTable({ stock, onSaved }: EpsTableProps) {
                   <div className="eps-row">
                     <select
                       className="period-select"
-                      aria-label="Year and quarter without an EPS value"
+                      aria-label="Year and quarter"
                       value={selectedMissing}
                       onChange={(event) => setSelectedMissing(event.target.value)}
                     >
@@ -233,7 +270,8 @@ export function EpsTable({ stock, onSaved }: EpsTableProps) {
                           aria-label="EPS"
                           value={eps}
                           onChange={(event) => setEps(event.target.value)}
-                          placeholder="EPS"
+                          placeholder={epsRequiredForAdd ? "EPS" : "EPS optional"}
+                          required={epsRequiredForAdd}
                           autoComplete="off"
                         />
                         <button type="button" className="small" onClick={() => void saveAdd()} disabled={busy}>
@@ -263,8 +301,23 @@ export function EpsTable({ stock, onSaved }: EpsTableProps) {
   );
 }
 
-function plainEps(value: string): string {
+function plainEps(value: string | null): string {
+  if (value === null) return "";
   const number = Number(value);
   if (!Number.isFinite(number)) return value;
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 6, useGrouping: false }).format(number);
+}
+
+function selectedPeriodFrom(key: string): { year: number; quarter: number } | null {
+  const [yearText, quarterText] = key.split("-");
+  const year = Number(yearText);
+  const quarter = Number(quarterText);
+  if (!Number.isInteger(year) || !Number.isInteger(quarter)) return null;
+  return { year, quarter };
+}
+
+function isoToday(now = new Date()): string {
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
 }

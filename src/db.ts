@@ -40,10 +40,14 @@ create table if not exists velquaris.earnings (
   year integer not null,
   quarter integer not null,
   report_date date not null,
-  eps numeric not null,
+  eps numeric,
   primary key (ticker, year, quarter),
   check (quarter between 1 and 4)
 );
+
+create unique index if not exists earnings_one_unreported
+  on velquaris.earnings (ticker)
+  where eps is null;
 
 create table if not exists velquaris.splits (
   ticker text not null references velquaris.stocks (ticker) on delete cascade,
@@ -108,7 +112,7 @@ export type Earning = {
   year: number;
   quarter: number;
   reportDate: string;
-  value: string;
+  value: string | null;
 };
 
 export type StockHistory = {
@@ -172,6 +176,8 @@ begin
     alter table velquaris.earnings add constraint earnings_quarter check (quarter between 1 and 4);
   end if;
 end $$;
+
+alter table velquaris.earnings alter column eps drop not null;
 `;
 
 export async function migrate(): Promise<void> {
@@ -207,7 +213,7 @@ export async function listStocks(): Promise<StockSummary[]> {
     ) p on true
     left join lateral (
       select eps, year, quarter from velquaris.earnings
-      where ticker = s.ticker
+      where ticker = s.ticker and eps is not null
       order by year desc, quarter desc
       limit 1
     ) e on true
@@ -218,7 +224,7 @@ export async function listStocks(): Promise<StockSummary[]> {
     year: number;
     quarter: number;
     report_date: string;
-    value: string;
+    value: string | null;
   }>(`
     select ticker, year, quarter, report_date::text as report_date, eps::text as value
     from velquaris.earnings
@@ -264,12 +270,12 @@ export type EarningInput = {
   year: number;
   quarter: number;
   reportDate: string;
-  eps: number;
+  eps: number | null;
 };
 
 export type SavedEarning =
-  | { ok: true; year: number; quarter: number; reportDate: string; eps: string }
-  | { ok: false; reason: "missing" | "conflict" };
+  | { ok: true; year: number; quarter: number; reportDate: string; eps: string | null }
+  | { ok: false; reason: "missing" | "conflict" | "pending" | "later" | "eps" };
 
 export async function saveEarning(
   ticker: string,
@@ -285,15 +291,29 @@ export async function saveEarning(
       return { ok: false, reason: "missing" };
     }
 
+    const excludeYear = previous?.year ?? earning.year;
+    const excludeQuarter = previous?.quarter ?? earning.quarter;
+    const others = await client.query<{ year: number; quarter: number; eps: string | null }>(
+      `select year, quarter, eps::text as eps
+       from velquaris.earnings
+       where ticker = $1 and not (year = $2 and quarter = $3)`,
+      [ticker, excludeYear, excludeQuarter],
+    );
+    const blocked = unreportedEarningError(earning, others.rows, isoToday());
+    if (blocked) {
+      await client.query("rollback");
+      return { ok: false, reason: blocked };
+    }
+
     const saved = previous
-      ? await client.query<{ year: number; quarter: number; report_date: string; eps: string }>(
+      ? await client.query<{ year: number; quarter: number; report_date: string; eps: string | null }>(
           `update velquaris.earnings
            set year = $3, quarter = $4, report_date = $5::date, eps = $6
            where ticker = $1 and year = $2 and quarter = $7
            returning year, quarter, report_date::text as report_date, eps::text as eps`,
           [ticker, previous.year, earning.year, earning.quarter, earning.reportDate, earning.eps, previous.quarter],
         )
-      : await client.query<{ year: number; quarter: number; report_date: string; eps: string }>(
+      : await client.query<{ year: number; quarter: number; report_date: string; eps: string | null }>(
           `insert into velquaris.earnings (ticker, year, quarter, report_date, eps)
            values ($1, $2, $3, $4::date, $5)
            returning year, quarter, report_date::text as report_date, eps::text as eps`,
@@ -309,6 +329,7 @@ export async function saveEarning(
     return { ok: true, year: row.year, quarter: row.quarter, reportDate: row.report_date, eps: row.eps };
   } catch (error) {
     await client.query("rollback");
+    if (uniqueConstraint(error) === "earnings_one_unreported") return { ok: false, reason: "pending" };
     if (isUniqueViolation(error)) return { ok: false, reason: "conflict" };
     throw error;
   } finally {
@@ -316,8 +337,39 @@ export async function saveEarning(
   }
 }
 
+function unreportedEarningError(
+  earning: EarningInput,
+  others: Array<{ year: number; quarter: number; eps: string | null }>,
+  today: string,
+): "pending" | "later" | "eps" | null {
+  const pending = others.find((row) => row.eps === null);
+  if (earning.eps === null) {
+    if (earning.reportDate < today) return "eps";
+    if (pending) return "pending";
+    if (others.some((row) => !isAfterPeriod(earning.year, earning.quarter, row.year, row.quarter))) return "eps";
+    return null;
+  }
+  if (pending && !isAfterPeriod(pending.year, pending.quarter, earning.year, earning.quarter)) return "later";
+  return null;
+}
+
+function isAfterPeriod(year: number, quarter: number, otherYear: number, otherQuarter: number): boolean {
+  return year > otherYear || (year === otherYear && quarter > otherQuarter);
+}
+
+function isoToday(now = new Date()): string {
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
 function isUniqueViolation(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "23505";
+  return uniqueConstraint(error) !== null;
+}
+
+function uniqueConstraint(error: unknown): string | null {
+  if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "23505") return null;
+  return "constraint" in error && typeof error.constraint === "string" ? error.constraint : "";
 }
 
 export type SplitInput = {
@@ -473,7 +525,7 @@ function mapSplit(row: { split_date: string; new_shares: number; old_shares: num
 }
 
 async function earningsFor(ticker: string): Promise<Earning[]> {
-  const result = await pool.query<{ year: number; quarter: number; report_date: string; value: string }>(
+  const result = await pool.query<{ year: number; quarter: number; report_date: string; value: string | null }>(
     `select year, quarter, report_date::text as report_date, eps::text as value
      from velquaris.earnings
      where ticker = $1

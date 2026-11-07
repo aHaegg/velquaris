@@ -25,7 +25,7 @@ export type Earning = {
   year: number;
   quarter: number;
   reportDate: string;
-  value: string;
+  value: string | null;
 };
 
 export type StockHistory = {

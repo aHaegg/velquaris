@@ -19,6 +19,10 @@ export function listMissingQuarters(prices: HistoryPoint[], earnings: Earning[],
       options.push({ year, quarter, label: periodLabel(year, quarter) });
     }
   }
+  const upcoming = endQuarter === 4 ? { year: endYear + 1, quarter: 1 } : { year: endYear, quarter: endQuarter + 1 };
+  if (!taken.has(periodKey(upcoming.year, upcoming.quarter))) {
+    options.unshift({ year: upcoming.year, quarter: upcoming.quarter, label: periodLabel(upcoming.year, upcoming.quarter) });
+  }
   return options;
 }
 
